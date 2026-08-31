@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-black: #05070b;
+    --color-surface-dark: #0b0f17;
+    --color-surface-card: #101726;
+    --color-morandi-blue: #6e8ca6;
+    --color-morandi-light: #9cb7d1;
+    --color-morandi-dark: #3a5066;
+    --color-royal-blue: #1d4ed8;
+    --color-royal-bright: #2563eb;
+    --color-royal-glow: #3b82f6;
+  }
+
+  body {
+    background-color: #05070b;
+    color: #f8fafc;
+    font-family: 'Plus Jakarta Sans', 'Noto Sans TC', sans-serif;
+  }
+
+  h1, h2, h3, .font-serif-luxury {
+    font-family: 'Cinzel', 'Noto Serif TC', serif;
+  }
+
+  .font-display-luxury {
+    font-family: 'Playfair Display', 'Noto Serif TC', serif;
+  }
+}
+
+/* Custom Morandi Blue & Royal Blue Utility helpers */
+.text-morandi-blue {
+  color: #9cb7d1;
+}
+
+.bg-morandi-blue {
+  background-color: #6e8ca6;
+}
+
+.border-morandi-blue {
+  border-color: rgba(110, 140, 166, 0.35);
+}
+
+.bg-morandi-surface {
+  background-color: rgba(110, 140, 166, 0.1);
+}
+
+.text-royal-blue {
+  color: #60a5fa;
+}
+
+.bg-royal-blue {
+  background-color: #1d4ed8;
+}
+
+.border-royal-blue {
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.shadow-royal-glow {
+  box-shadow: 0 0 25px rgba(37, 99, 235, 0.3);
+}
+
+.shadow-morandi-glow {
+  box-shadow: 0 0 20px rgba(110, 140, 166, 0.2);
+}
+

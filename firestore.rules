@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Orders collection: Allow read and write for the bar ordering workflow
+    match /orders/{orderId} {
+      allow read, write: if true;
+    }
+    
+    // Staff roster collection: Allow read and write for staff management
+    match /staff/{staffId} {
+      allow read, write: if true;
+    }
+    
+    // Default fallback
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
