@@ -282,7 +282,7 @@ export const INITIAL_ORDERS: Order[] = [
     centerStaffId: 'staff-1',
     centerStaffName: '三月五日 (March 5th)',
     centerStaffAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
-    flairTheme: '現場專屬花式調酒表演秀',
+    flairTheme: '花式調酒',
     cocktails: [],
     guestName: '林先生',
     specialRequests: '朋友生日，希望能有祝賀歡呼！',
@@ -300,8 +300,8 @@ export const INITIAL_ORDERS: Order[] = [
     location: '2. 2F休息區',
     guestName: '小宇',
     items: [
-      { type: 'with_art_sign', name: '拍立得 (簽繪)', price: 300000, quantity: 1, poseRequest: '想要合比大愛心+畫一隻小黑貓' },
-      { type: 'without_sign', name: '拍立得 (無簽)', price: 80000, quantity: 2 }
+      { type: 'with_art_sign', name: '拍立得(簽繪)', price: 300000, quantity: 1, poseRequest: '想要合比大愛心+畫一隻小黑貓' },
+      { type: 'without_sign', name: '拍立得(無簽)', price: 80000, quantity: 2 }
     ],
     remarks: '請琉璃店員準備空檔時過來拍攝即可～',
     status: 'preparing',
@@ -318,8 +318,8 @@ export const INITIAL_ORDERS: Order[] = [
     location: '1. B1酒吧',
     guestName: '王總經理',
     items: [
-      { type: 'with_sign', name: '拍立得 (有簽)', price: 150000, quantity: 3, poseRequest: '公司聚餐紀念，祝業績長紅' },
-      { type: 'with_art_sign', name: '拍立得 (簽繪)', price: 300000, quantity: 1, poseRequest: '畫代表吉祥的幸運草' }
+      { type: 'with_sign', name: '拍立得(有簽)', price: 150000, quantity: 3, poseRequest: '公司聚餐紀念，祝業績長紅' },
+      { type: 'with_art_sign', name: '拍立得(簽繪)', price: 300000, quantity: 1, poseRequest: '畫代表吉祥的幸運草' }
     ],
     remarks: '包廂內燈光較暗，麻煩帶補光燈',
     status: 'pending',

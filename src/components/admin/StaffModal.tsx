@@ -50,9 +50,21 @@ export const StaffModal: React.FC<StaffModalProps> = ({
         centerAvailability: staff.centerAvailability,
         tags: staff.tags || ['專業服務'],
         chekiServices: {
-          without_sign: { ...staff.chekiServices.without_sign },
-          with_sign: { ...staff.chekiServices.with_sign },
-          with_art_sign: { ...staff.chekiServices.with_art_sign }
+          without_sign: {
+            available: staff.chekiServices?.without_sign?.available !== false,
+            price: staff.chekiServices?.without_sign?.price ?? 80000,
+            description: staff.chekiServices?.without_sign?.description || '標準拍立得合照一張'
+          },
+          with_sign: {
+            available: staff.chekiServices?.with_sign?.available !== false,
+            price: staff.chekiServices?.with_sign?.price ?? 150000,
+            description: staff.chekiServices?.with_sign?.description || '親筆簽名 + 專屬署名'
+          },
+          with_art_sign: {
+            available: staff.chekiServices?.with_art_sign?.available !== false,
+            price: staff.chekiServices?.with_art_sign?.price ?? 300000,
+            description: staff.chekiServices?.with_art_sign?.description || '客製手繪圖騰與祝福彩繪'
+          }
         },
         totalCenterOrdersCount: staff.totalCenterOrdersCount || 0,
         totalChekiCount: staff.totalChekiCount || 0

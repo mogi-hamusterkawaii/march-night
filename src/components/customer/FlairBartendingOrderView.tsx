@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   Wine, Users, MapPin, Star, Flame, Sparkles, Plus, Minus,
-  ArrowLeft, CheckCircle, ShieldCheck, HeartHandshake, Info 
+  ArrowLeft, CheckCircle, ShieldCheck, HeartHandshake, Info, Dices 
 } from 'lucide-react';
 import { playClickSound } from '../../utils/audio';
 
@@ -41,7 +41,7 @@ export const FlairBartendingOrderView: React.FC = () => {
       if (isPresetOnDuty) return preselectedStaffId;
     }
     const available = staffList.find(s => s.status === 'on_duty' && s.centerAvailability);
-    return available ? available.id : (onDutyStaffList[0]?.id || '');
+    return available ? available.id : (onDutyStaffList[0]?.id || 'random');
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,7 +62,8 @@ export const FlairBartendingOrderView: React.FC = () => {
     setGuestLocation(location);
   }, [location, setGuestLocation]);
 
-  const selectedStaff = staffList.find(s => s.id === selectedStaffId);
+  const isRandomSelected = selectedStaffId === 'random';
+  const selectedStaff = isRandomSelected ? null : staffList.find(s => s.id === selectedStaffId);
 
   // Calculate totals
   const totalAmount = 400000; // 400,000 Gil Base Flair Show fee
@@ -79,7 +80,11 @@ export const FlairBartendingOrderView: React.FC = () => {
       setValidationError('客人人數需至少為 1 位');
       return;
     }
-    if (!selectedStaff) {
+    if (!selectedStaffId) {
+      setValidationError('請選擇一位您想要的C位店員');
+      return;
+    }
+    if (!isRandomSelected && !selectedStaff) {
       setValidationError('請選擇一位您想要的C位店員');
       return;
     }
@@ -91,17 +96,23 @@ export const FlairBartendingOrderView: React.FC = () => {
       ? `${location} (${customLocationNotes})` 
       : location;
 
+    const centerStaffId = isRandomSelected ? 'random' : selectedStaff!.id;
+    const centerStaffName = isRandomSelected ? '🎲 隨機一位店員 (現場抽選)' : `${selectedStaff!.name} (${selectedStaff!.nickname})`;
+    const centerStaffAvatar = isRandomSelected 
+      ? 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?w=400&auto=format&fit=crop&q=80' 
+      : selectedStaff!.avatar;
+
     try {
       const newOrder = await addFlairOrder({
         guestCount,
         location: fullLocation,
-        centerStaffId: selectedStaff.id,
-        centerStaffName: `${selectedStaff.name} (${selectedStaff.nickname})`,
-        centerStaffAvatar: selectedStaff.avatar,
-        flairTheme: '現場專屬花式調酒表演秀',
+        centerStaffId,
+        centerStaffName,
+        centerStaffAvatar,
+        flairTheme: '花式調酒',
         cocktails: [],
         guestName: guestName.trim() || 'VIP貴賓',
-        specialRequests: '',
+        specialRequests: isRandomSelected ? '【指定C位：隨機一位店員】' : '',
         totalAmount
       });
 
@@ -269,98 +280,162 @@ export const FlairBartendingOrderView: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5 pb-4 border-b border-white/10">
             <div className="flex items-center gap-2.5">
               <Star className="w-5 h-5 text-blue-400 fill-blue-400" />
-              <h2 className="font-serif-luxury text-lg font-bold text-white">2. 選擇您想要的 C 位店員調酒師</h2>
+              <h2 className="font-serif-luxury text-lg font-bold text-white">2. 選擇您想要的 C 位店員</h2>
               <span className="text-xs text-[#9cb7d1] font-medium">* 必選項目</span>
             </div>
             <span className="text-xs text-white/50">
-              由所選C位店員主導今晚的花式調酒表演
+              由所選C位店員為您呈現專屬花式調酒
             </span>
           </div>
 
           {/* Staff Grid Cards */}
-          {onDutyStaffList.length === 0 ? (
-            <div className="text-center py-10 bg-white/[0.02] border border-white/10 rounded-2xl">
-              <p className="text-sm text-white/60">目前暫無在班店員，請稍候或向工作人員洽詢。</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            
+            {/* Special Option: 隨機一位店員 */}
+            <div
+              key="random-staff"
+              onClick={() => {
+                playClickSound();
+                setSelectedStaffId('random');
+              }}
+              className={`relative rounded-3xl p-5 transition-all border flex flex-col justify-between cursor-pointer ${
+                isRandomSelected
+                  ? 'bg-blue-600/15 border-blue-400 shadow-[0_0_30px_rgba(37,99,235,0.25)]'
+                  : 'bg-[#0b0f17] border-white/10 hover:border-white/20'
+              }`}
+              id="card-staff-random"
+            >
+              {/* Selected Center Badge */}
+              {isRandomSelected && (
+                <div className="absolute -top-3 right-4 bg-blue-600 text-white text-[11px] font-black px-3 py-0.5 rounded-full flex items-center gap-1 shadow-md">
+                  <Sparkles className="w-3 h-3" />
+                  已指定為 C 位
+                </div>
+              )}
+
+              <div>
+                <div className="flex items-start gap-3.5">
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-300 shadow-md">
+                      <Dices className="w-8 h-8" />
+                    </div>
+                    <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#0b0f17] bg-blue-400" />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-white text-base truncate">隨機一位店員</span>
+                    </div>
+                    <div className="text-xs text-[#9cb7d1] font-medium truncate mt-0.5">現場隨機安排</div>
+                  </div>
+                </div>
+
+                {/* Specialty callout */}
+                <div className="mt-3.5 bg-white/[0.03] border border-white/10 rounded-2xl p-2.5 text-xs">
+                  <div className="text-[#9cb7d1] font-semibold flex items-center gap-1 text-[11px]">
+                    <Flame className="w-3 h-3 text-blue-400" />
+                    C位拿手專長:
+                  </div>
+                  <p className="text-white/80 text-[11px] mt-0.5 line-clamp-2">
+                    由今晚在班店員中隨機指派一位擔當 C 位表演，帶來驚喜互動與專屬演出！
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between">
+                <span className="text-[11px] text-blue-300 font-medium">
+                  🔵 現場隨機指派
+                </span>
+                <button
+                  type="button"
+                  className={`text-xs px-3.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    isRandomSelected
+                      ? 'bg-[#9FB5C3] text-[#0b0f17] shadow-sm font-extrabold'
+                      : 'bg-white/[0.05] hover:bg-white/10 text-white/80 border border-white/10'
+                  }`}
+                >
+                  {isRandomSelected ? '✓ 目前C位' : '選擇為C位'}
+                </button>
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {onDutyStaffList.map(staff => {
-                const isSelected = selectedStaffId === staff.id;
 
-                return (
-                  <div
-                    key={staff.id}
-                    onClick={() => {
-                      playClickSound();
-                      setSelectedStaffId(staff.id);
-                    }}
-                    className={`relative rounded-3xl p-5 transition-all border flex flex-col justify-between cursor-pointer ${
-                      isSelected
-                        ? 'bg-blue-600/15 border-blue-400 shadow-[0_0_30px_rgba(37,99,235,0.25)]'
-                        : 'bg-[#0b0f17] border-white/10 hover:border-white/20'
-                    }`}
-                    id={`card-staff-${staff.id}`}
-                  >
-                    {/* Selected Center Badge */}
-                    {isSelected && (
-                      <div className="absolute -top-3 right-4 bg-blue-600 text-white text-[11px] font-black px-3 py-0.5 rounded-full flex items-center gap-1 shadow-md">
-                        <Sparkles className="w-3 h-3" />
-                        已指定為 C 位
-                      </div>
-                    )}
+            {/* Existing On-Duty Staff */}
+            {onDutyStaffList.map(staff => {
+              const isSelected = selectedStaffId === staff.id;
 
-                    <div>
-                      <div className="flex items-start gap-3.5">
-                        <div className="relative">
-                          <img
-                            src={staff.avatar}
-                            alt={staff.name}
-                            className="w-16 h-16 rounded-2xl object-cover border border-white/20 shadow-md"
-                          />
-                          <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#0b0f17] bg-blue-400" />
-                        </div>
+              return (
+                <div
+                  key={staff.id}
+                  onClick={() => {
+                    playClickSound();
+                    setSelectedStaffId(staff.id);
+                  }}
+                  className={`relative rounded-3xl p-5 transition-all border flex flex-col justify-between cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600/15 border-blue-400 shadow-[0_0_30px_rgba(37,99,235,0.25)]'
+                      : 'bg-[#0b0f17] border-white/10 hover:border-white/20'
+                  }`}
+                  id={`card-staff-${staff.id}`}
+                >
+                  {/* Selected Center Badge */}
+                  {isSelected && (
+                    <div className="absolute -top-3 right-4 bg-blue-600 text-white text-[11px] font-black px-3 py-0.5 rounded-full flex items-center gap-1 shadow-md">
+                      <Sparkles className="w-3 h-3" />
+                      已指定為 C 位
+                    </div>
+                  )}
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-white text-base truncate">{staff.name}</span>
-                            <span className="text-xs text-white/50 truncate">({staff.nickname})</span>
-                          </div>
-                          <div className="text-xs text-[#9cb7d1] font-medium truncate mt-0.5">{staff.title}</div>
-                        </div>
+                  <div>
+                    <div className="flex items-start gap-3.5">
+                      <div className="relative">
+                        <img
+                          src={staff.avatar}
+                          alt={staff.name}
+                          className="w-16 h-16 rounded-2xl object-cover border border-white/20 shadow-md"
+                        />
+                        <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#0b0f17] bg-blue-400" />
                       </div>
 
-                      {/* Specialty callout */}
-                      <div className="mt-3.5 bg-white/[0.03] border border-white/10 rounded-2xl p-2.5 text-xs">
-                        <div className="text-[#9cb7d1] font-semibold flex items-center gap-1 text-[11px]">
-                          <Flame className="w-3 h-3 text-blue-400" />
-                          C位拿手專長:
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-white text-base truncate">{staff.name}</span>
+                          <span className="text-xs text-white/50 truncate">({staff.nickname})</span>
                         </div>
-                        <p className="text-white/80 text-[11px] mt-0.5 line-clamp-2">
-                          {staff.flairSpecialty}
-                        </p>
+                        <div className="text-xs text-[#9cb7d1] font-medium truncate mt-0.5">{staff.title}</div>
                       </div>
                     </div>
 
-                    <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between">
-                      <span className="text-[11px] text-blue-300 font-medium">
-                        🔵 在班可指定
-                      </span>
-                      <button
-                        type="button"
-                        className={`text-xs px-3.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-[#9FB5C3] text-[#0b0f17] shadow-sm font-extrabold'
-                            : 'bg-white/[0.05] hover:bg-white/10 text-white/80 border border-white/10'
-                        }`}
-                      >
-                        {isSelected ? '✓ 目前C位' : '選擇為C位'}
-                      </button>
+                    {/* Specialty callout */}
+                    <div className="mt-3.5 bg-white/[0.03] border border-white/10 rounded-2xl p-2.5 text-xs">
+                      <div className="text-[#9cb7d1] font-semibold flex items-center gap-1 text-[11px]">
+                        <Flame className="w-3 h-3 text-blue-400" />
+                        C位拿手專長:
+                      </div>
+                      <p className="text-white/80 text-[11px] mt-0.5 line-clamp-2">
+                        {staff.flairSpecialty}
+                      </p>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
+
+                  <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between">
+                    <span className="text-[11px] text-blue-300 font-medium">
+                      🔵 在班可指定
+                    </span>
+                    <button
+                      type="button"
+                      className={`text-xs px-3.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#9FB5C3] text-[#0b0f17] shadow-sm font-extrabold'
+                          : 'bg-white/[0.05] hover:bg-white/10 text-white/80 border border-white/10'
+                      }`}
+                    >
+                      {isSelected ? '✓ 目前C位' : '選擇為C位'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Validation error banner */}
@@ -375,10 +450,13 @@ export const FlairBartendingOrderView: React.FC = () => {
         <div className="bg-white/[0.04] backdrop-blur-xl border-2 border-blue-500/50 rounded-3xl p-6 sm:p-7 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-5">
           <div>
             <div className="text-xs text-white/60 font-medium">
-              {location} • 共 {guestCount} 位 • 指定 C 位：<span className="text-blue-300 font-bold">{selectedStaff?.name}</span>
+              {location} • 共 {guestCount} 位 • 指定 C 位：
+              <span className="text-blue-300 font-bold ml-1">
+                {isRandomSelected ? '🎲 隨機一位店員 (現場安排)' : selectedStaff?.name}
+              </span>
             </div>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-xs text-[#9cb7d1]">專屬 C 位花式調酒表演費</span>
+              <span className="text-xs text-[#9cb7d1]">專屬 C 位花式調酒費</span>
               <span className="font-serif-luxury text-3xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-blue-200 to-white">{totalAmount.toLocaleString()} Gil</span>
             </div>
           </div>

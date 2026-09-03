@@ -94,18 +94,15 @@ export const HomeSelection: React.FC = () => {
               <div className="w-14 h-14 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-300 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(37,99,235,0.3)]">
                 <Flame className="w-7 h-7" />
               </div>
-              <span className="px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/35 text-blue-200 text-[11px] font-bold tracking-wider uppercase">
-                🔥 視覺極致震撼
-              </span>
             </div>
 
             <h2 className="font-serif-luxury text-2xl sm:text-3xl font-bold text-white group-hover:text-blue-200 transition-colors flex items-center gap-2.5">
-              花式調酒服務
+              花式調酒
               <Wine className="w-5 h-5 text-blue-400" />
             </h2>
 
             <p className="text-white/70 text-sm mt-3.5 leading-relaxed font-light">
-              桌邊近距離享受空中高難度拋接與魔幻調色視覺秀！自訂同行人數與座位，並指定您最鍾愛的<span className="text-blue-300 font-semibold">C位店員調酒師</span>親臨演出。
+              桌邊近距離享受空中高難度拋接與魔幻調色視覺秀！自訂同行人數與座位，並指定您最鍾愛的<span className="text-blue-300 font-semibold">C位店員</span>親臨演出。
             </p>
 
             {/* Feature Highlights */}
@@ -150,9 +147,6 @@ export const HomeSelection: React.FC = () => {
               <div className="w-14 h-14 rounded-2xl bg-[#5c7c99]/20 border border-[#6e8ca6]/40 flex items-center justify-center text-[#9cb7d1] group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(110,140,166,0.25)]">
                 <Camera className="w-7 h-7" />
               </div>
-              <span className="px-3 py-1 rounded-full bg-[#5c7c99]/20 border border-[#6e8ca6]/40 text-[#9cb7d1] text-[11px] font-bold tracking-wider uppercase">
-                ✨ 專屬拍立得回憶
-              </span>
             </div>
 
             <h2 className="font-serif-luxury text-2xl sm:text-3xl font-bold text-white group-hover:text-[#9cb7d1] transition-colors flex items-center gap-2.5">

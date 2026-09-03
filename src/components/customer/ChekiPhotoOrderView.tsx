@@ -95,9 +95,13 @@ export const ChekiPhotoOrderView: React.FC = () => {
 
   const calculateTotal = () => {
     if (!selectedStaff) return 0;
-    const p1 = (quantities.without_sign || 0) * (selectedStaff.chekiServices.without_sign.price || 200);
-    const p2 = (quantities.with_sign || 0) * (selectedStaff.chekiServices.with_sign.price || 350);
-    const p3 = (quantities.with_art_sign || 0) * (selectedStaff.chekiServices.with_art_sign.price || 550);
+    const p1Price = selectedStaff.chekiServices?.without_sign?.price ?? 80000;
+    const p2Price = selectedStaff.chekiServices?.with_sign?.price ?? 150000;
+    const p3Price = selectedStaff.chekiServices?.with_art_sign?.price ?? 300000;
+
+    const p1 = (quantities.without_sign || 0) * p1Price;
+    const p2 = (quantities.with_sign || 0) * p2Price;
+    const p3 = (quantities.with_art_sign || 0) * p3Price;
     return p1 + p2 + p3;
   };
 
@@ -131,11 +135,15 @@ export const ChekiPhotoOrderView: React.FC = () => {
       poseRequest?: string;
     }> = [];
 
+    const withoutSignPrice = selectedStaff.chekiServices?.without_sign?.price ?? 80000;
+    const withSignPrice = selectedStaff.chekiServices?.with_sign?.price ?? 150000;
+    const withArtSignPrice = selectedStaff.chekiServices?.with_art_sign?.price ?? 300000;
+
     if (quantities.without_sign > 0) {
       items.push({
         type: 'without_sign',
-        name: '拍立得 (無簽)',
-        price: selectedStaff.chekiServices.without_sign.price,
+        name: '拍立得(無簽)',
+        price: withoutSignPrice,
         quantity: quantities.without_sign
       });
     }
@@ -143,8 +151,8 @@ export const ChekiPhotoOrderView: React.FC = () => {
     if (quantities.with_sign > 0) {
       items.push({
         type: 'with_sign',
-        name: '拍立得 (有簽)',
-        price: selectedStaff.chekiServices.with_sign.price,
+        name: '拍立得(有簽)',
+        price: withSignPrice,
         quantity: quantities.with_sign
       });
     }
@@ -152,8 +160,8 @@ export const ChekiPhotoOrderView: React.FC = () => {
     if (quantities.with_art_sign > 0) {
       items.push({
         type: 'with_art_sign',
-        name: '拍立得 (簽繪)',
-        price: selectedStaff.chekiServices.with_art_sign.price,
+        name: '拍立得(簽繪)',
+        price: withArtSignPrice,
         quantity: quantities.with_art_sign
       });
     }
@@ -302,16 +310,16 @@ export const ChekiPhotoOrderView: React.FC = () => {
                       <div className="mt-4 pt-3.5 border-t border-white/10 grid grid-cols-3 gap-1.5 text-center">
                         <div className="bg-white/[0.02] p-2 rounded-xl border border-white/5">
                           <div className="text-[10px] text-white/50">無簽</div>
-                          <div className="text-xs font-bold text-white mt-0.5">{staff.chekiServices.without_sign.price.toLocaleString()} Gil</div>
+                          <div className="text-xs font-bold text-white mt-0.5">{(staff.chekiServices?.without_sign?.price ?? 80000).toLocaleString()} Gil</div>
                         </div>
                         <div className="bg-white/[0.02] p-2 rounded-xl border border-white/5">
                           <div className="text-[10px] text-white/50">有簽</div>
-                          <div className="text-xs font-bold text-blue-400 mt-0.5">{staff.chekiServices.with_sign.price.toLocaleString()} Gil</div>
+                          <div className="text-xs font-bold text-blue-400 mt-0.5">{(staff.chekiServices?.with_sign?.price ?? 150000).toLocaleString()} Gil</div>
                         </div>
                         <div className="bg-white/[0.02] p-2 rounded-xl border border-white/5">
                           <div className="text-[10px] text-white/50">簽繪</div>
                           <div className="text-xs font-bold text-[#9cb7d1] mt-0.5">
-                            {staff.chekiServices.with_art_sign.available ? `${staff.chekiServices.with_art_sign.price.toLocaleString()} Gil` : '暫停'}
+                            {staff.chekiServices?.with_art_sign?.available !== false ? `${(staff.chekiServices?.with_art_sign?.price ?? 300000).toLocaleString()} Gil` : '暫停'}
                           </div>
                         </div>
                       </div>
@@ -471,14 +479,14 @@ export const ChekiPhotoOrderView: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <h4 className="font-bold text-white text-base">拍立得 (無簽)</h4>
                         <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/[0.08] text-white/70 border border-white/10">
-                          經典留念
+                          {selectedStaff.chekiServices?.without_sign?.badge || '經典留念'}
                         </span>
                       </div>
                       <p className="text-xs text-white/60 mt-1">
-                        {selectedStaff.chekiServices.without_sign.description || '與店員合照或單人拍立得一張，純底片原汁原味收藏。'}
+                        {selectedStaff.chekiServices?.without_sign?.description || '與店員合照或單人拍立得一張，純底片原汁原味收藏。'}
                       </p>
                       <div className="text-blue-400 font-extrabold text-base mt-2">
-                        {selectedStaff.chekiServices.without_sign.price.toLocaleString()} Gil <span className="text-xs text-[#9cb7d1] font-normal">/ 張</span>
+                        {(selectedStaff.chekiServices?.without_sign?.price ?? 80000).toLocaleString()} Gil <span className="text-xs text-[#9cb7d1] font-normal">/ 張</span>
                       </div>
                     </div>
                   </div>
@@ -521,14 +529,14 @@ export const ChekiPhotoOrderView: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <h4 className="font-bold text-white text-base">拍立得 (有簽)</h4>
                         <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-600/30 text-blue-300 border border-blue-500/40 font-bold">
-                          ★ 人氣推薦
+                          {selectedStaff.chekiServices?.with_sign?.badge || '★ 人氣推薦'}
                         </span>
                       </div>
                       <p className="text-xs text-white/60 mt-1">
-                        {selectedStaff.chekiServices.with_sign.description || '店員親筆簽名 + 專屬署名 + 當天日期 + 溫馨心情短語。'}
+                        {selectedStaff.chekiServices?.with_sign?.description || '店員親筆簽名 + 專屬署名 + 當天日期 + 溫馨心情短語。'}
                       </p>
                       <div className="text-blue-400 font-extrabold text-base mt-2">
-                        {selectedStaff.chekiServices.with_sign.price.toLocaleString()} Gil <span className="text-xs text-[#9cb7d1] font-normal">/ 張</span>
+                        {(selectedStaff.chekiServices?.with_sign?.price ?? 150000).toLocaleString()} Gil <span className="text-xs text-[#9cb7d1] font-normal">/ 張</span>
                       </div>
                     </div>
                   </div>
@@ -558,7 +566,7 @@ export const ChekiPhotoOrderView: React.FC = () => {
 
               {/* Service 3: 拍立得(簽繪) */}
               <div className={`p-5 rounded-2xl border transition-all ${
-                !selectedStaff.chekiServices.with_art_sign.available
+                selectedStaff.chekiServices?.with_art_sign?.available === false
                   ? 'bg-[#0b0f17]/40 border-white/5 opacity-50'
                   : quantities.with_art_sign > 0
                   ? 'bg-blue-600/15 border-blue-400 shadow-[0_0_20px_rgba(37,99,235,0.2)]'
@@ -573,23 +581,23 @@ export const ChekiPhotoOrderView: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <h4 className="font-bold text-white text-base">拍立得 (簽繪)</h4>
                         <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-600/20 text-[#9cb7d1] border border-blue-500/30 font-bold">
-                          ✨ 限量手繪大作
+                          {selectedStaff.chekiServices?.with_art_sign?.badge || '✨ 限量手繪大作'}
                         </span>
-                        {!selectedStaff.chekiServices.with_art_sign.available && (
+                        {selectedStaff.chekiServices?.with_art_sign?.available === false && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/50">今日額滿</span>
                         )}
                       </div>
                       <p className="text-xs text-white/60 mt-1">
-                        {selectedStaff.chekiServices.with_art_sign.description || '由店員全手工繪製專屬Q版插畫、華麗邊框彩繪與客製祝福，極具收藏價值！'}
+                        {selectedStaff.chekiServices?.with_art_sign?.description || '由店員全手工繪製專屬Q版插畫、華麗邊框彩繪與客製祝福，極具收藏價值！'}
                       </p>
                       <div className="text-blue-400 font-extrabold text-base mt-2">
-                        {selectedStaff.chekiServices.with_art_sign.price.toLocaleString()} Gil <span className="text-xs text-[#9cb7d1] font-normal">/ 張 (精緻手繪)</span>
+                        {(selectedStaff.chekiServices?.with_art_sign?.price ?? 300000).toLocaleString()} Gil <span className="text-xs text-[#9cb7d1] font-normal">/ 張 (精緻手繪)</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Quantity Controller */}
-                  {selectedStaff.chekiServices.with_art_sign.available ? (
+                  {selectedStaff.chekiServices?.with_art_sign?.available !== false ? (
                     <div className="flex items-center gap-3 self-end sm:self-center bg-[#0b0f17] border border-white/10 p-2 rounded-2xl">
                       <button
                         type="button"

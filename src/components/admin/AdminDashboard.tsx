@@ -3,7 +3,8 @@ import { useApp } from '../../context/AppContext';
 import { 
   Wine, Camera, Users, Settings, Plus, Edit2, Trash2, CheckCircle2, 
   Clock, AlertCircle, Sparkles, TrendingUp, Flame, Heart, FileText, 
-  RotateCcw, DollarSign, Layers, MapPin, Eye, Star, Moon, Download, Check, ShieldAlert 
+  RotateCcw, DollarSign, Layers, MapPin, Eye, Star, Moon, Download, Check, ShieldAlert,
+  Database, Copy, ExternalLink
 } from 'lucide-react';
 import { playClickSound } from '../../utils/audio';
 import { Order, OrderStatus, Staff, TableLocation } from '../../types';
@@ -26,13 +27,14 @@ export const AdminDashboard: React.FC = () => {
     deleteTable,
     resetToDefaultData,
     setMode,
-    setCustomerView
+    setCustomerView,
+    dbType
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'orders' | 'staff' | 'tables' | 'analytics'>('orders');
   
-  // Orders filter
-  const [serviceFilter, setServiceFilter] = useState<'all' | 'flair_bartending' | 'cheki_photo'>('all');
+  // Orders filter: 4 standard items (花式調酒, 拍立得(無簽), 拍立得(有簽), 拍立得(簽繪))
+  const [serviceFilter, setServiceFilter] = useState<'all' | 'flair' | 'without_sign' | 'with_sign' | 'with_art_sign'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'pending'>('all');
 
   // Modals state
@@ -42,9 +44,119 @@ export const AdminDashboard: React.FC = () => {
   const [selectedReceiptOrder, setSelectedReceiptOrder] = useState<Order | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
 
+  // Format timestamp to YYYY/M/D HH:mm (例：2026/9/3 20:30)
+  const formatOrderDateTime = (timestamp: number) => {
+    if (!timestamp) return '';
+    const d = new Date(timestamp);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}/${month}/${day} ${hours}:${minutes}`;
+  };
+
   // Daily Closing & Clear Orders Modal
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+
+  // Supabase SQL Schema Modal
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  const supabaseSqlSchema = `-- ==========================================
+-- 三月森夜 (MARCH NIGHT) Supabase PostgreSQL 資料表結構腳本
+-- 請將此段 SQL 複製並貼入 Supabase 後台的 SQL Editor 中執行 (Run)
+-- ==========================================
+
+-- 1. 建立店員名冊資料表 (staff)
+CREATE TABLE IF NOT EXISTS public.staff (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  nickname TEXT,
+  title TEXT,
+  avatar TEXT,
+  status TEXT DEFAULT 'on_duty',
+  "centerAvailability" BOOLEAN DEFAULT true,
+  "flairSpecialty" TEXT,
+  "photoPriceWithoutSign" INTEGER DEFAULT 200000,
+  "photoPriceWithSign" INTEGER DEFAULT 250000,
+  "photoPriceWithArtSign" INTEGER DEFAULT 300000,
+  "totalCenterOrdersCount" INTEGER DEFAULT 0,
+  "totalChekiCount" INTEGER DEFAULT 0
+);
+
+-- 2. 建立調酒品項資料表 (cocktails)
+CREATE TABLE IF NOT EXISTS public.cocktails (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT,
+  "alcoholLevel" INTEGER DEFAULT 2,
+  price INTEGER DEFAULT 0,
+  description TEXT,
+  ingredients JSONB DEFAULT '[]'::jsonb,
+  "isSignature" BOOLEAN DEFAULT false,
+  "iconColor" TEXT
+);
+
+-- 3. 建立席位桌號資料表 (tables)
+CREATE TABLE IF NOT EXISTS public.tables (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL,
+  area TEXT NOT NULL,
+  capacity INTEGER DEFAULT 2,
+  "isVip" BOOLEAN DEFAULT false,
+  "isAvailable" BOOLEAN DEFAULT true
+);
+
+-- 4. 建立訂單資料表 (orders)
+CREATE TABLE IF NOT EXISTS public.orders (
+  id TEXT PRIMARY KEY,
+  "orderNo" TEXT NOT NULL,
+  "serviceType" TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  location TEXT,
+  "guestName" TEXT,
+  "totalAmount" INTEGER DEFAULT 0,
+  "createdAt" BIGINT NOT NULL,
+  "guestCount" INTEGER,
+  "centerStaffId" TEXT,
+  "centerStaffName" TEXT,
+  "centerStaffAvatar" TEXT,
+  "flairTheme" TEXT,
+  cocktails JSONB DEFAULT '[]'::jsonb,
+  "staffId" TEXT,
+  "staffName" TEXT,
+  "staffAvatar" TEXT,
+  items JSONB DEFAULT '[]'::jsonb,
+  "specialRequests" TEXT,
+  remarks TEXT
+);
+
+-- 5. 啟用即時變更廣播 (Realtime)
+ALTER PUBLICATION supabase_realtime ADD TABLE staff;
+ALTER PUBLICATION supabase_realtime ADD TABLE cocktails;
+ALTER PUBLICATION supabase_realtime ADD TABLE tables;
+ALTER PUBLICATION supabase_realtime ADD TABLE orders;
+
+-- 6. 設定存取權限 (若有啟用 RLS)
+ALTER TABLE public.staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cocktails ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tables ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public all access on staff" ON public.staff FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on cocktails" ON public.cocktails FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on tables" ON public.tables FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on orders" ON public.orders FOR ALL USING (true) WITH CHECK (true);
+`;
+
+  const copySqlToClipboard = () => {
+    navigator.clipboard.writeText(supabaseSqlSchema);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2500);
+  };
 
   // Export Daily CSV function
   const exportDailyReportCSV = () => {
@@ -57,11 +169,11 @@ export const AdminDashboard: React.FC = () => {
     
     const rows = orders.map(o => {
       const isFlair = o.serviceType === 'flair_bartending';
-      const timeStr = new Date(o.createdAt).toLocaleString();
-      const serviceName = isFlair ? '花式調酒' : '拍立得攝影';
+      const timeStr = formatOrderDateTime(o.createdAt);
+      const serviceName = isFlair ? '花式調酒' : '拍立得';
       const staffName = isFlair ? o.centerStaffName : o.staffName;
       const details = isFlair 
-        ? `主題:${o.flairTheme} | ${o.cocktails.map(c => `${c.name}x${c.quantity}`).join(';')}`
+        ? `花式調酒 (${o.guestCount}位)${o.specialRequests ? ` 備註:${o.specialRequests}` : ''}`
         : o.items.map(it => `${it.name}x${it.quantity}`).join(';');
       const statusMap: Record<OrderStatus, string> = {
         pending: '待處理',
@@ -119,9 +231,21 @@ export const AdminDashboard: React.FC = () => {
       return sum;
     }, 0);
 
-  // Filtered Orders
+  // Filtered Orders (based on 4 standard items)
   const filteredOrders = orders.filter(order => {
-    if (serviceFilter !== 'all' && order.serviceType !== serviceFilter) return false;
+    if (serviceFilter === 'flair' && order.serviceType !== 'flair_bartending') return false;
+    if (serviceFilter === 'without_sign') {
+      if (order.serviceType !== 'cheki_photo') return false;
+      if (!order.items?.some(it => it.type === 'without_sign' || it.name.includes('無簽'))) return false;
+    }
+    if (serviceFilter === 'with_sign') {
+      if (order.serviceType !== 'cheki_photo') return false;
+      if (!order.items?.some(it => it.type === 'with_sign' || it.name.includes('有簽'))) return false;
+    }
+    if (serviceFilter === 'with_art_sign') {
+      if (order.serviceType !== 'cheki_photo') return false;
+      if (!order.items?.some(it => it.type === 'with_art_sign' || it.name.includes('簽繪'))) return false;
+    }
     if (statusFilter === 'active' && !(order.status === 'pending' || order.status === 'preparing' || order.status === 'in_service')) return false;
     if (statusFilter === 'pending' && order.status !== 'pending') return false;
     if (statusFilter === 'completed' && order.status !== 'completed') return false;
@@ -157,7 +281,7 @@ export const AdminDashboard: React.FC = () => {
             </span>
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5 shadow-[0_0_12px_rgba(16,185,129,0.25)]">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-              Firebase 雲端即時連線 (march-night)
+              Supabase 雲端即時連線 (cexkuwkorvunxzetqoyj)
             </span>
           </div>
           <h1 className="font-serif-luxury text-2xl sm:text-3xl font-extrabold text-white mt-1.5">
@@ -169,6 +293,18 @@ export const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => {
+              playClickSound();
+              setIsSqlModalOpen(true);
+            }}
+            className="px-3.5 py-2.5 rounded-2xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 font-bold text-xs shadow-[0_0_15px_rgba(37,99,235,0.2)] transition-all flex items-center gap-1.5 cursor-pointer"
+            title="查看並複製 Supabase 資料庫結構腳本"
+          >
+            <Database className="w-4 h-4 text-blue-400" />
+            <span>Supabase SQL 腳本</span>
+          </button>
+
           <button
             onClick={() => {
               playClickSound();
@@ -238,27 +374,27 @@ export const AdminDashboard: React.FC = () => {
 
         <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-3xl p-5 shadow-2xl">
           <div className="flex items-center justify-between text-white/50 text-xs">
-            <span>花式調酒表演場次</span>
+            <span>花式調酒場次</span>
             <Flame className="w-4 h-4 text-blue-400" />
           </div>
           <div className="font-serif-luxury text-2xl font-black text-white mt-1.5">
-            {flairOrdersCount} <span className="text-xs text-white/40 font-normal">場表演</span>
+            {flairOrdersCount} <span className="text-xs text-white/40 font-normal">場次</span>
           </div>
           <div className="text-[11px] text-white/40 mt-1">
-            C位店員出秀紀錄
+            C位店員調酒紀錄
           </div>
         </div>
 
         <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-3xl p-5 shadow-2xl">
           <div className="flex items-center justify-between text-white/50 text-xs">
-            <span>拍立得攝影銷售總量</span>
+            <span>拍立得銷售總量</span>
             <Camera className="w-4 h-4 text-[#9cb7d1]" />
           </div>
           <div className="font-serif-luxury text-2xl font-black text-[#9cb7d1] mt-1.5">
-            {totalChekiCount} <span className="text-xs text-white/40 font-normal">張底片</span>
+            {totalChekiCount} <span className="text-xs text-white/40 font-normal">張</span>
           </div>
           <div className="text-[11px] text-[#9cb7d1]/80 mt-1">
-            無簽 / 有簽 / 簽繪
+            無簽 / 有簽 / 簽繪 3大項目
           </div>
         </div>
       </div>
@@ -330,32 +466,50 @@ export const AdminDashboard: React.FC = () => {
           {/* Filter Bar */}
           <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-white/50 font-semibold mr-1">服務類別:</span>
+              <span className="text-xs text-white/50 font-semibold mr-1">品項篩選:</span>
               <button
                 onClick={() => setServiceFilter('all')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
                   serviceFilter === 'all' ? 'bg-blue-600 text-white font-bold border border-blue-400/30' : 'text-white/50 hover:text-white'
                 }`}
               >
-                全部服務
+                全部品項
               </button>
               <button
-                onClick={() => setServiceFilter('flair_bartending')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
-                  serviceFilter === 'flair_bartending' ? 'bg-blue-600/30 text-blue-200 border border-blue-400/40 font-bold' : 'text-white/50 hover:text-white'
+                onClick={() => setServiceFilter('flair')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  serviceFilter === 'flair' ? 'bg-blue-600/30 text-blue-200 border border-blue-400/40 font-bold' : 'text-white/50 hover:text-white'
                 }`}
               >
                 <Wine className="w-3.5 h-3.5" />
                 🍸 花式調酒
               </button>
               <button
-                onClick={() => setServiceFilter('cheki_photo')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
-                  serviceFilter === 'cheki_photo' ? 'bg-blue-600/30 text-blue-200 border border-blue-400/40 font-bold' : 'text-white/50 hover:text-white'
+                onClick={() => setServiceFilter('without_sign')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  serviceFilter === 'without_sign' ? 'bg-blue-600/30 text-blue-200 border border-blue-400/40 font-bold' : 'text-white/50 hover:text-white'
                 }`}
               >
                 <Camera className="w-3.5 h-3.5" />
-                📸 拍立得攝影
+                📷 拍立得(無簽)
+              </button>
+              <button
+                onClick={() => setServiceFilter('with_sign')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  serviceFilter === 'with_sign' ? 'bg-blue-600/30 text-blue-200 border border-blue-400/40 font-bold' : 'text-white/50 hover:text-white'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                ✒️ 拍立得(有簽)
+              </button>
+              <button
+                onClick={() => setServiceFilter('with_art_sign')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  serviceFilter === 'with_art_sign' ? 'bg-blue-600/30 text-blue-200 border border-blue-400/40 font-bold' : 'text-white/50 hover:text-white'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                🎨 拍立得(簽繪)
               </button>
             </div>
 
@@ -397,6 +551,9 @@ export const AdminDashboard: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {filteredOrders.map(order => {
                 const isFlair = order.serviceType === 'flair_bartending';
+                const chekiNames = !isFlair && order.items && order.items.length > 0
+                  ? order.items.map(it => it.name).join(' + ')
+                  : '拍立得';
 
                 return (
                   <div
@@ -413,7 +570,7 @@ export const AdminDashboard: React.FC = () => {
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="font-serif-luxury font-bold text-white text-base">
-                                {isFlair ? '花式調酒表演' : '拍立得攝影服務'}
+                                {isFlair ? '花式調酒' : chekiNames}
                               </span>
                               <span className="text-xs font-mono text-white/40">#{order.orderNo}</span>
                             </div>
@@ -469,33 +626,54 @@ export const AdminDashboard: React.FC = () => {
                         </div>
 
                         {isFlair ? (
-                          <div className="mt-2.5 text-xs space-y-1.5">
-                            <div className="text-white/50 flex justify-between">
-                              <span>主題:</span>
-                              <span className="text-white/80">{order.flairTheme}</span>
+                          <div className="mt-2.5 text-xs space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-white/50">服務品項:</span>
+                              <span className="font-bold text-blue-300 bg-blue-500/15 px-2 py-0.5 rounded border border-blue-500/30">
+                                花式調酒
+                              </span>
                             </div>
-                            {order.cocktails.length > 0 && (
-                              <div className="text-white/80 text-[11px] pt-1">
-                                調酒: {order.cocktails.map(c => `${c.name} x${c.quantity}`).join(', ')}
+                            <div className="flex justify-between text-white/70">
+                              <span className="text-white/50">入場人數:</span>
+                              <span className="font-medium text-white">{order.guestCount} 位貴賓</span>
+                            </div>
+                            {order.specialRequests && (
+                              <div className="text-white/70 text-[11px] pt-2 border-t border-white/5">
+                                <span className="text-white/40 mr-1">需求備註:</span>
+                                {order.specialRequests}
                               </div>
                             )}
                           </div>
                         ) : (
                           <div className="mt-2.5 text-xs space-y-1.5">
-                            <div className="text-white/80 text-[11px]">
-                              {order.items.map((it, idx) => (
-                                <div key={idx} className="flex justify-between py-0.5">
-                                  <span>{it.name} x{it.quantity}</span>
-                                  <span className="text-white/50 font-mono">{(it.price * it.quantity).toLocaleString()} Gil</span>
+                            <div className="text-white/50 text-[11px] mb-1">服務品項:</div>
+                            {order.items.map((it, idx) => (
+                              <div key={idx} className="flex justify-between items-center py-1 border-b border-white/5 last:border-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-white">{it.name}</span>
+                                  <span className="text-blue-400 font-bold">x{it.quantity}</span>
+                                  {it.poseRequest && (
+                                    <span className="text-[10px] text-[#9cb7d1] bg-white/5 px-1.5 py-0.5 rounded">
+                                      ({it.poseRequest})
+                                    </span>
+                                  )}
                                 </div>
-                              ))}
-                            </div>
+                                <span className="text-white/60 font-mono">{(it.price * it.quantity).toLocaleString()} Gil</span>
+                              </div>
+                            ))}
+                            {order.remarks && (
+                              <div className="text-white/60 text-[11px] pt-2 border-t border-white/5">
+                                <span className="text-white/40 mr-1">備註:</span>
+                                {order.remarks}
+                              </div>
+                            )}
                           </div>
                         )}
 
                         <div className="mt-3 pt-2.5 border-t border-white/10 flex justify-between items-center text-xs">
-                          <span className="text-white/40 font-mono">
-                            {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <span className="text-white/40 font-mono flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-white/40" />
+                            {formatOrderDateTime(order.createdAt)}
                           </span>
                           <span className="font-serif-luxury text-base font-black text-white font-mono">總計 {order.totalAmount.toLocaleString()} Gil</span>
                         </div>
@@ -860,7 +1038,7 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           <div className="font-bold text-white text-xs">{staff.name} ({staff.nickname})</div>
                           <div className="text-[10px] text-[#9cb7d1]">
-                            簽繪: {staff.chekiServices.with_art_sign.price.toLocaleString()} Gil / 有簽: {staff.chekiServices.with_sign.price.toLocaleString()} Gil
+                            簽繪: {(staff.chekiServices?.with_art_sign?.price ?? 300000).toLocaleString()} Gil / 有簽: {(staff.chekiServices?.with_sign?.price ?? 150000).toLocaleString()} Gil
                           </div>
                         </div>
                       </div>
@@ -878,47 +1056,78 @@ export const AdminDashboard: React.FC = () => {
 
           </div>
 
-          {/* Cheki Service 3-tier Breakdown Summary */}
+          {/* 4 Standard Service Items Breakdown Summary */}
           <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-7 shadow-2xl">
-            <h3 className="font-serif-luxury font-bold text-white text-base mb-5">拍立得 3 大服務項目銷售分佈</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <h3 className="font-serif-luxury font-bold text-white text-base mb-5">門市 4 大品項銷售數據統計</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-[#0b0f17] border border-blue-500/20 p-5 rounded-2xl text-center">
+                <div className="text-xs text-blue-300 font-medium">🍸 花式調酒</div>
+                <div className="font-serif-luxury text-2xl font-black text-white mt-1.5 font-mono">
+                  {orders.filter(o => o.serviceType === 'flair_bartending').length} 場次
+                </div>
+                <div className="text-[11px] text-white/40 mt-1">
+                  總額: {orders.filter(o => o.serviceType === 'flair_bartending').reduce((s, o) => s + (o.totalAmount || 0), 0).toLocaleString()} Gil
+                </div>
+              </div>
+
               <div className="bg-[#0b0f17] border border-white/10 p-5 rounded-2xl text-center">
-                <div className="text-xs text-white/50 font-medium">拍立得 (無簽)</div>
+                <div className="text-xs text-white/60 font-medium">📷 拍立得 (無簽)</div>
                 <div className="font-serif-luxury text-2xl font-black text-white mt-1.5 font-mono">
                   {orders.reduce((acc, o) => {
                     if (o.serviceType === 'cheki_photo') {
-                      return acc + o.items.filter(i => i.type === 'without_sign').reduce((s, i) => s + i.quantity, 0);
+                      return acc + o.items.filter(i => i.type === 'without_sign' || i.name.includes('無簽')).reduce((s, i) => s + i.quantity, 0);
                     }
                     return acc;
                   }, 0)} 張
                 </div>
-                <div className="text-[10px] text-white/40 mt-1">基本底片留念</div>
+                <div className="text-[11px] text-white/40 mt-1">
+                  總額: {orders.reduce((acc, o) => {
+                    if (o.serviceType === 'cheki_photo') {
+                      return acc + o.items.filter(i => i.type === 'without_sign' || i.name.includes('無簽')).reduce((s, i) => s + (i.price * i.quantity), 0);
+                    }
+                    return acc;
+                  }, 0).toLocaleString()} Gil
+                </div>
               </div>
 
               <div className="bg-[#0b0f17] border border-white/10 p-5 rounded-2xl text-center">
-                <div className="text-xs text-blue-300 font-medium">拍立得 (有簽)</div>
+                <div className="text-xs text-blue-300 font-medium">✒️ 拍立得 (有簽)</div>
                 <div className="font-serif-luxury text-2xl font-black text-blue-200 mt-1.5 font-mono">
                   {orders.reduce((acc, o) => {
                     if (o.serviceType === 'cheki_photo') {
-                      return acc + o.items.filter(i => i.type === 'with_sign').reduce((s, i) => s + i.quantity, 0);
+                      return acc + o.items.filter(i => i.type === 'with_sign' || i.name.includes('有簽')).reduce((s, i) => s + i.quantity, 0);
                     }
                     return acc;
                   }, 0)} 張
                 </div>
-                <div className="text-[10px] text-blue-300/70 mt-1">親筆署名寄語</div>
+                <div className="text-[11px] text-blue-300/60 mt-1">
+                  總額: {orders.reduce((acc, o) => {
+                    if (o.serviceType === 'cheki_photo') {
+                      return acc + o.items.filter(i => i.type === 'with_sign' || i.name.includes('有簽')).reduce((s, i) => s + (i.price * i.quantity), 0);
+                    }
+                    return acc;
+                  }, 0).toLocaleString()} Gil
+                </div>
               </div>
 
               <div className="bg-[#0b0f17] border border-white/10 p-5 rounded-2xl text-center">
-                <div className="text-xs text-[#9cb7d1] font-medium">拍立得 (簽繪)</div>
+                <div className="text-xs text-[#9cb7d1] font-medium">🎨 拍立得 (簽繪)</div>
                 <div className="font-serif-luxury text-2xl font-black text-[#9cb7d1] mt-1.5 font-mono">
                   {orders.reduce((acc, o) => {
                     if (o.serviceType === 'cheki_photo') {
-                      return acc + o.items.filter(i => i.type === 'with_art_sign').reduce((s, i) => s + i.quantity, 0);
+                      return acc + o.items.filter(i => i.type === 'with_art_sign' || i.name.includes('簽繪')).reduce((s, i) => s + i.quantity, 0);
                     }
                     return acc;
                   }, 0)} 張
                 </div>
-                <div className="text-[10px] text-[#9cb7d1]/70 mt-1">限量滿版手繪彩繪</div>
+                <div className="text-[11px] text-[#9cb7d1]/60 mt-1">
+                  總額: {orders.reduce((acc, o) => {
+                    if (o.serviceType === 'cheki_photo') {
+                      return acc + o.items.filter(i => i.type === 'with_art_sign' || i.name.includes('簽繪')).reduce((s, i) => s + (i.price * i.quantity), 0);
+                    }
+                    return acc;
+                  }, 0).toLocaleString()} Gil
+                </div>
               </div>
             </div>
           </div>
@@ -1072,6 +1281,70 @@ export const AdminDashboard: React.FC = () => {
               >
                 <Trash2 className="w-4 h-4" />
                 <span>{isClearing ? '正在清空雲端訂單...' : '確認清空今日訂單 (營業額歸零)'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Supabase SQL Schema Helper Modal */}
+      {isSqlModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0b0f17] border border-blue-500/30 rounded-3xl max-w-2xl w-full p-6 shadow-2xl relative flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between pb-4 border-b border-white/10">
+              <div className="flex items-center gap-2.5">
+                <Database className="w-5 h-5 text-blue-400" />
+                <h3 className="font-serif-luxury text-lg font-bold text-white">
+                  Supabase 資料庫結構建立腳本
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsSqlModalOpen(false)}
+                className="p-1.5 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3 flex-1 overflow-y-auto">
+              <p className="text-xs text-white/70 leading-relaxed">
+                如果您尚未在 Supabase 建立對應的 4 張資料表（<code className="text-blue-300">staff</code>、<code className="text-blue-300">cocktails</code>、<code className="text-blue-300">tables</code>、<code className="text-blue-300">orders</code>），請複製下方 SQL 腳本，前往 Supabase 控制台的 <strong>SQL Editor</strong> 貼上並執行（Run）即可！
+              </p>
+
+              <div className="relative">
+                <pre className="bg-[#05070a] border border-white/10 rounded-2xl p-4 text-[11px] font-mono text-blue-200/90 overflow-x-auto max-h-72 leading-relaxed">
+                  {supabaseSqlSchema}
+                </pre>
+                <button
+                  onClick={copySqlToClipboard}
+                  className="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+                >
+                  {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedSql ? '已複製到剪貼簿！' : '一鍵複製 SQL'}</span>
+                </button>
+              </div>
+
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-[11px] text-emerald-300 flex items-center gap-2">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>專案已成功連接至您的 Supabase（<code className="font-mono">cexkuwkorvunxzetqoyj</code>），已全面啟用即時推播與線上存儲！</span>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-white/10 flex items-center justify-between">
+              <a
+                href="https://supabase.com/dashboard/project/cexkuwkorvunxzetqoyj/sql/new"
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold"
+              >
+                <span>前往 Supabase SQL Editor 頁面</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <button
+                onClick={() => setIsSqlModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-white/[0.05] hover:bg-white/10 text-white text-xs font-bold transition-colors cursor-pointer border border-white/10"
+              >
+                關閉視窗
               </button>
             </div>
           </div>

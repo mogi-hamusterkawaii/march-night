@@ -20,6 +20,17 @@ export const OrderReceiptModal: React.FC<OrderReceiptModalProps> = ({
 
   const isFlair = order.serviceType === 'flair_bartending';
 
+  const formatOrderDateTime = (timestamp: number) => {
+    if (!timestamp) return '';
+    const d = new Date(timestamp);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}/${month}/${day} ${hours}:${minutes}`;
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -48,7 +59,7 @@ export const OrderReceiptModal: React.FC<OrderReceiptModalProps> = ({
           <div className="py-3 border-b border-dashed border-neutral-300 space-y-1.5 text-[11px]">
             <div className="flex justify-between">
               <span className="text-neutral-500">服務類型:</span>
-              <span className="font-bold">{isFlair ? '🍸 花式調酒' : '📸 拍立得攝影'}</span>
+              <span className="font-bold">{isFlair ? '🍸 花式調酒' : '📸 拍立得'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-neutral-500">所在桌位:</span>
@@ -60,7 +71,7 @@ export const OrderReceiptModal: React.FC<OrderReceiptModalProps> = ({
             </div>
             <div className="flex justify-between">
               <span className="text-neutral-500">出單時間:</span>
-              <span>{new Date(order.createdAt).toLocaleString('zh-TW')}</span>
+              <span className="font-mono font-medium">{formatOrderDateTime(order.createdAt)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-neutral-500">指派服務人員:</span>
@@ -72,23 +83,17 @@ export const OrderReceiptModal: React.FC<OrderReceiptModalProps> = ({
 
           {/* Details */}
           <div className="py-3 border-b-2 border-dashed border-neutral-300">
-            <div className="font-bold mb-2 text-neutral-700">服務與品項清單：</div>
+            <div className="font-bold mb-2 text-neutral-700">訂購品項明細：</div>
             {isFlair ? (
-              <div className="space-y-1">
-                <div className="flex justify-between text-neutral-800">
-                  <span>C位花式調酒表演秀 (主題: {order.flairTheme})</span>
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-neutral-900 font-black text-xs">
+                  <span>花式調酒</span>
                   <span className="font-mono font-bold">{(order.totalAmount || 400000).toLocaleString()} Gil</span>
                 </div>
-                <div className="text-[10px] text-neutral-500">同行人數: {order.guestCount} 位</div>
-                {order.cocktails.map((c, i) => (
-                  <div key={i} className="flex justify-between text-neutral-800 pt-1">
-                    <span>{c.name} x {c.quantity}</span>
-                    <span className="font-mono font-bold">{(c.price * c.quantity).toLocaleString()} Gil</span>
-                  </div>
-                ))}
+                <div className="text-[11px] text-neutral-600">服務人數: {order.guestCount} 位</div>
                 {order.specialRequests && (
-                  <div className="mt-2 bg-neutral-100 p-1.5 rounded text-[10px] text-neutral-700">
-                    備註: {order.specialRequests}
+                  <div className="mt-2 bg-neutral-100 p-2 rounded text-[11px] text-neutral-700">
+                    備註需求: {order.specialRequests}
                   </div>
                 )}
               </div>

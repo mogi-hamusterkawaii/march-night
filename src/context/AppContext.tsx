@@ -2,19 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Staff, CocktailItem, TableLocation, Order, OrderStatus, AppNotification, FlairBartendingOrder, ChekiPhotoOrder } from '../types';
 import { INITIAL_STAFF, INITIAL_COCKTAILS, INITIAL_TABLES, INITIAL_ORDERS } from '../data/initialData';
 import { playOrderSuccessSound, playStatusUpdateSound } from '../utils/audio';
-import { db } from '../lib/firebase';
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  updateDoc, 
-  onSnapshot, 
-  query, 
-  orderBy,
-  writeBatch,
-  getDocs
-} from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 
 interface AppContextType {
   mode: 'customer' | 'admin';
@@ -90,6 +78,7 @@ interface AppContextType {
 
   // Sync status
   isOnline: boolean;
+  dbType: string;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -99,6 +88,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [customerView, setCustomerView] = useState<'home' | 'bartending' | 'cheki' | 'orders_status'>('home');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
+  const dbType = 'Supabase';
 
   // My Order IDs saved locally for guest privacy tracking
   const [myOrderIds, setMyOrderIds] = useState<string[]>(() => {
@@ -159,114 +149,224 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ==========================================
-  // REAL-TIME FIRESTORE SYNCHRONIZATION
+  // NORMALIZERS FOR ROBUST RUNTIME SAFETY
+  // ==========================================
+  const normalizeStaff = (s: any): Staff => {
+    if (!s) return INITIAL_STAFF[0];
+    
+    // Support nested chekiServices or flat photoPrice columns
+    const withoutSignPrice = s.chekiServices?.without_sign?.price ?? s.photoPriceWithoutSign ?? 80000;
+    const withSignPrice = s.chekiServices?.with_sign?.price ?? s.photoPriceWithSign ?? 150000;
+    const withArtSignPrice = s.chekiServices?.with_art_sign?.price ?? s.photoPriceWithArtSign ?? 300000;
+
+    return {
+      id: String(s.id || 'staff-' + Math.random().toString(36).substr(2, 6)),
+      name: s.name || '店員',
+      nickname: s.nickname || '',
+      avatar: s.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
+      title: s.title || '特調調酒師',
+      bio: s.bio || '',
+      status: (s.status === 'on_duty' || s.status === 'break' || s.status === 'off_duty') ? s.status : 'on_duty',
+      flairSpecialty: s.flairSpecialty || '花式特調表演',
+      flairSkillRating: typeof s.flairSkillRating === 'number' ? s.flairSkillRating : 5,
+      centerAvailability: s.centerAvailability !== false,
+      tags: Array.isArray(s.tags) ? s.tags : ['專業服務'],
+      chekiServices: {
+        without_sign: {
+          available: s.chekiServices?.without_sign?.available !== false,
+          price: withoutSignPrice,
+          description: s.chekiServices?.without_sign?.description || '標準單人或合照拍立得一張，留存三月森夜美好時刻。',
+          badge: s.chekiServices?.without_sign?.badge || '經典必拍'
+        },
+        with_sign: {
+          available: s.chekiServices?.with_sign?.available !== false,
+          price: withSignPrice,
+          description: s.chekiServices?.with_sign?.description || '拍立得上親筆簽名、專屬署名與當日紀念日期。',
+          badge: s.chekiServices?.with_sign?.badge || '超人氣'
+        },
+        with_art_sign: {
+          available: s.chekiServices?.with_art_sign?.available !== false,
+          price: withArtSignPrice,
+          description: s.chekiServices?.with_art_sign?.description || '店員親手繪製特調圖騰、萌系愛心與專屬祝福寄語。',
+          badge: s.chekiServices?.with_art_sign?.badge || '極致珍藏'
+        }
+      },
+      totalCenterOrdersCount: Number(s.totalCenterOrdersCount || 0),
+      totalChekiCount: Number(s.totalChekiCount || 0)
+    };
+  };
+
+  const serializeStaffForSupabase = (staff: Staff) => ({
+    id: staff.id,
+    name: staff.name,
+    nickname: staff.nickname,
+    title: staff.title,
+    avatar: staff.avatar,
+    status: staff.status,
+    centerAvailability: staff.centerAvailability,
+    flairSpecialty: staff.flairSpecialty,
+    photoPriceWithoutSign: staff.chekiServices?.without_sign?.price ?? 80000,
+    photoPriceWithSign: staff.chekiServices?.with_sign?.price ?? 150000,
+    photoPriceWithArtSign: staff.chekiServices?.with_art_sign?.price ?? 300000,
+    totalCenterOrdersCount: staff.totalCenterOrdersCount || 0,
+    totalChekiCount: staff.totalChekiCount || 0
+  });
+
+  // ==========================================
+  // REAL-TIME SUPABASE POSTGRESQL SYNCHRONIZATION
   // ==========================================
 
-  // 1. Subscribe to Staff List
-  useEffect(() => {
-    const staffRef = collection(db, 'staff');
-    const unsubscribe = onSnapshot(staffRef, (snapshot) => {
-      if (snapshot.empty) {
-        // Initialize Firestore with default staff if empty
-        const batch = writeBatch(db);
-        INITIAL_STAFF.forEach(staff => {
-          batch.set(doc(db, 'staff', staff.id), staff);
-        });
-        batch.commit().catch(console.error);
-        setStaffList(INITIAL_STAFF);
+  // Helper to fetch all data from Supabase
+  const loadInitialDataFromSupabase = async () => {
+    try {
+      // 1. Fetch Staff
+      const { data: staffData, error: staffErr } = await supabase.from('staff').select('*');
+      if (staffErr) {
+        console.warn('Supabase staff fetch error (table may need creation):', staffErr.message);
+      } else if (staffData && staffData.length > 0) {
+        setStaffList(staffData.map(normalizeStaff));
       } else {
-        const loadedStaff: Staff[] = [];
-        snapshot.forEach(docSnap => {
-          loadedStaff.push(docSnap.data() as Staff);
-        });
-        setStaffList(loadedStaff);
+        // Auto-seed initial staff if table exists and is empty
+        try {
+          await supabase.from('staff').upsert(INITIAL_STAFF.map(serializeStaffForSupabase));
+        } catch (e) {
+          console.warn('Failed to seed initial staff:', e);
+        }
       }
-    }, (error) => {
-      console.warn('Firestore staff subscription fallback to local:', error);
-      setIsOnline(false);
-    });
 
-    return () => unsubscribe();
-  }, []);
-
-  // 2. Subscribe to Cocktails
-  useEffect(() => {
-    const cocktailsRef = collection(db, 'cocktails');
-    const unsubscribe = onSnapshot(cocktailsRef, (snapshot) => {
-      if (snapshot.empty) {
-        const batch = writeBatch(db);
-        INITIAL_COCKTAILS.forEach(item => {
-          batch.set(doc(db, 'cocktails', item.id), item);
-        });
-        batch.commit().catch(console.error);
-        setCocktails(INITIAL_COCKTAILS);
+      // 2. Fetch Cocktails
+      const { data: cocktailData, error: cocktailErr } = await supabase.from('cocktails').select('*');
+      if (cocktailErr) {
+        console.warn('Supabase cocktails fetch error:', cocktailErr.message);
+      } else if (cocktailData && cocktailData.length > 0) {
+        setCocktails(cocktailData as CocktailItem[]);
       } else {
-        const loaded: CocktailItem[] = [];
-        snapshot.forEach(docSnap => {
-          loaded.push(docSnap.data() as CocktailItem);
-        });
-        setCocktails(loaded);
+        try {
+          await supabase.from('cocktails').upsert(INITIAL_COCKTAILS);
+        } catch (e) {
+          console.warn('Failed to seed initial cocktails:', e);
+        }
       }
-    }, (error) => {
-      console.warn('Firestore cocktails subscription fallback:', error);
-    });
 
-    return () => unsubscribe();
-  }, []);
-
-  // 3. Subscribe to Tables
-  useEffect(() => {
-    const tablesRef = collection(db, 'tables');
-    const unsubscribe = onSnapshot(tablesRef, (snapshot) => {
-      if (snapshot.empty) {
-        const batch = writeBatch(db);
-        INITIAL_TABLES.forEach(table => {
-          batch.set(doc(db, 'tables', table.id), table);
-        });
-        batch.commit().catch(console.error);
-        setTables(INITIAL_TABLES);
+      // 3. Fetch Tables
+      const { data: tableData, error: tableErr } = await supabase.from('tables').select('*');
+      if (tableErr) {
+        console.warn('Supabase tables fetch error:', tableErr.message);
+      } else if (tableData && tableData.length > 0) {
+        const sorted = (tableData as TableLocation[]).sort((a, b) => a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
+        setTables(sorted);
       } else {
-        const loaded: TableLocation[] = [];
-        snapshot.forEach(docSnap => {
-          loaded.push(docSnap.data() as TableLocation);
-        });
-        // Sort by area and code
-        loaded.sort((a, b) => a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
-        setTables(loaded);
+        try {
+          await supabase.from('tables').upsert(INITIAL_TABLES);
+        } catch (e) {
+          console.warn('Failed to seed initial tables:', e);
+        }
       }
-    }, (error) => {
-      console.warn('Firestore tables subscription fallback:', error);
-    });
 
-    return () => unsubscribe();
-  }, []);
+      // 4. Fetch Orders
+      const { data: orderData, error: orderErr } = await supabase.from('orders').select('*').order('createdAt', { ascending: false });
+      if (orderErr) {
+        console.warn('Supabase orders fetch error:', orderErr.message);
+      } else if (orderData) {
+        setOrders(orderData as Order[]);
+      }
 
-  // 4. Subscribe to Real-Time Orders
+      setIsOnline(true);
+    } catch (err) {
+      console.warn('Supabase connection or initialization error:', err);
+    }
+  };
+
   useEffect(() => {
-    const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
-      if (snapshot.empty) {
-        setOrders([]);
-      } else {
-        const loadedOrders: Order[] = [];
-        snapshot.forEach(docSnap => {
-          loadedOrders.push(docSnap.data() as Order);
-        });
-        setOrders(loadedOrders);
-      }
-    }, (error) => {
-      console.warn('Firestore orders subscription fallback to local:', error);
-      setIsOnline(false);
-    });
+    loadInitialDataFromSupabase();
 
-    return () => unsubscribe();
+    // Setup Supabase Realtime Subscriptions
+    const channel = supabase
+      .channel('schema-db-changes')
+      // Listen to Orders
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newOrder = payload.new as Order;
+            setOrders(prev => {
+              if (prev.some(o => o.id === newOrder.id)) return prev;
+              return [newOrder, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as Order;
+            setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id: string }).id;
+            setOrders(prev => prev.filter(o => o.id !== deletedId));
+          }
+        }
+      )
+      // Listen to Staff
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'staff' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newStaff = normalizeStaff(payload.new);
+            setStaffList(prev => [...prev.filter(s => s.id !== newStaff.id), newStaff]);
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = normalizeStaff(payload.new);
+            setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s));
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id: string }).id;
+            setStaffList(prev => prev.filter(s => s.id !== deletedId));
+          }
+        }
+      )
+      // Listen to Cocktails
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cocktails' },
+        (payload) => {
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const updated = payload.new as CocktailItem;
+            setCocktails(prev => [...prev.filter(c => c.id !== updated.id), updated]);
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id: string }).id;
+            setCocktails(prev => prev.filter(c => c.id !== deletedId));
+          }
+        }
+      )
+      // Listen to Tables
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tables' },
+        (payload) => {
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const updated = payload.new as TableLocation;
+            setTables(prev => {
+              const filtered = prev.filter(t => t.id !== updated.id);
+              return [...filtered, updated].sort((a, b) => a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
+            });
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as { id: string }).id;
+            setTables(prev => prev.filter(t => t.id !== deletedId));
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setIsOnline(true);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Filter orders for the current guest
   const myOrders = orders.filter(o => myOrderIds.includes(o.id));
 
   // ==========================================
-  // ORDER ACTIONS (FIRESTORE CLOUD INTEGRATION)
+  // ORDER ACTIONS (SUPABASE INTEGRATION)
   // ==========================================
 
   const addFlairOrder = async (data: {
@@ -301,19 +401,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalAmount: data.totalAmount
     };
 
-    // Save to Cloud Firestore
+    // Save to Supabase
     try {
-      await setDoc(doc(db, 'orders', newOrder.id), newOrder);
-      
-      // Update staff performance count in Firestore
+      await supabase.from('orders').insert(newOrder);
+
+      // Update staff performance count in Supabase
       const targetStaff = staffList.find(s => s.id === data.centerStaffId);
       if (targetStaff) {
-        await updateDoc(doc(db, 'staff', targetStaff.id), {
-          totalCenterOrdersCount: (targetStaff.totalCenterOrdersCount || 0) + 1
-        });
+        const newCount = (targetStaff.totalCenterOrdersCount || 0) + 1;
+        await supabase.from('staff').update({ totalCenterOrdersCount: newCount }).eq('id', targetStaff.id);
       }
     } catch (err) {
-      console.error('Failed to sync flair order to Firestore:', err);
+      console.error('Failed to sync flair order to Supabase:', err);
     }
 
     // Local state updates
@@ -363,18 +462,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const totalQty = data.items.reduce((acc, i) => acc + i.quantity, 0);
 
-    // Save to Cloud Firestore
+    // Save to Supabase
     try {
-      await setDoc(doc(db, 'orders', newOrder.id), newOrder);
+      await supabase.from('orders').insert(newOrder);
       
       const targetStaff = staffList.find(s => s.id === data.staffId);
       if (targetStaff) {
-        await updateDoc(doc(db, 'staff', targetStaff.id), {
-          totalChekiCount: (targetStaff.totalChekiCount || 0) + totalQty
-        });
+        const newTotalCheki = (targetStaff.totalChekiCount || 0) + totalQty;
+        await supabase.from('staff').update({ totalChekiCount: newTotalCheki }).eq('id', targetStaff.id);
       }
     } catch (err) {
-      console.error('Failed to sync cheki order to Firestore:', err);
+      console.error('Failed to sync cheki order to Supabase:', err);
     }
 
     // Local state updates
@@ -396,9 +494,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status: newStatus });
+      await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
     } catch (err) {
-      console.error('Failed to update status in Firestore:', err);
+      console.error('Failed to update status in Supabase:', err);
     }
 
     setOrders(prev => prev.map(order => {
@@ -429,12 +527,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Staff Management (Firestore)
+  // Staff Management (Supabase)
   const updateStaff = async (updated: Staff) => {
     try {
-      await setDoc(doc(db, 'staff', updated.id), updated);
+      await supabase.from('staff').upsert(serializeStaffForSupabase(updated));
     } catch (err) {
-      console.error('Failed to update staff in Firestore:', err);
+      console.error('Failed to update staff in Supabase:', err);
     }
     setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s));
   };
@@ -447,28 +545,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalChekiCount: 0
     };
     try {
-      await setDoc(doc(db, 'staff', newStaff.id), newStaff);
+      await supabase.from('staff').insert(serializeStaffForSupabase(newStaff));
     } catch (err) {
-      console.error('Failed to add staff to Firestore:', err);
+      console.error('Failed to add staff to Supabase:', err);
     }
     setStaffList(prev => [...prev, newStaff]);
   };
 
   const deleteStaff = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'staff', id));
+      await supabase.from('staff').delete().eq('id', id);
     } catch (err) {
-      console.error('Failed to delete staff in Firestore:', err);
+      console.error('Failed to delete staff in Supabase:', err);
     }
     setStaffList(prev => prev.filter(s => s.id !== id));
   };
 
-  // Cocktails Management (Firestore)
+  // Cocktails Management (Supabase)
   const updateCocktail = async (item: CocktailItem) => {
     try {
-      await setDoc(doc(db, 'cocktails', item.id), item);
+      await supabase.from('cocktails').upsert(item);
     } catch (err) {
-      console.error('Failed to update cocktail in Firestore:', err);
+      console.error('Failed to update cocktail in Supabase:', err);
     }
     setCocktails(prev => prev.map(c => c.id === item.id ? item : c));
   };
@@ -479,28 +577,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: 'cocktail-' + Date.now()
     };
     try {
-      await setDoc(doc(db, 'cocktails', newItem.id), newItem);
+      await supabase.from('cocktails').insert(newItem);
     } catch (err) {
-      console.error('Failed to add cocktail in Firestore:', err);
+      console.error('Failed to add cocktail in Supabase:', err);
     }
     setCocktails(prev => [...prev, newItem]);
   };
 
   const deleteCocktail = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'cocktails', id));
+      await supabase.from('cocktails').delete().eq('id', id);
     } catch (err) {
-      console.error('Failed to delete cocktail in Firestore:', err);
+      console.error('Failed to delete cocktail in Supabase:', err);
     }
     setCocktails(prev => prev.filter(c => c.id !== id));
   };
 
-  // Tables Management (Firestore)
+  // Tables Management (Supabase)
   const updateTable = async (table: TableLocation) => {
     try {
-      await setDoc(doc(db, 'tables', table.id), table);
+      await supabase.from('tables').upsert(table);
     } catch (err) {
-      console.error('Failed to update table in Firestore:', err);
+      console.error('Failed to update table in Supabase:', err);
     }
     setTables(prev => prev.map(t => t.id === table.id ? table : t));
   };
@@ -511,28 +609,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: 'loc-' + Date.now()
     };
     try {
-      await setDoc(doc(db, 'tables', newTable.id), newTable);
+      await supabase.from('tables').insert(newTable);
     } catch (err) {
-      console.error('Failed to add table in Firestore:', err);
+      console.error('Failed to add table in Supabase:', err);
     }
     setTables(prev => [...prev, newTable]);
   };
 
   const deleteTable = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'tables', id));
+      await supabase.from('tables').delete().eq('id', id);
     } catch (err) {
-      console.error('Failed to delete table in Firestore:', err);
+      console.error('Failed to delete table in Supabase:', err);
     }
     setTables(prev => prev.filter(t => t.id !== id));
   };
 
-  // Single Order Deletion (Firestore)
+  // Single Order Deletion (Supabase)
   const deleteSingleOrder = async (orderId: string) => {
     try {
-      await deleteDoc(doc(db, 'orders', orderId));
+      await supabase.from('orders').delete().eq('id', orderId);
     } catch (err) {
-      console.error('Failed to delete order in Firestore:', err);
+      console.error('Failed to delete order in Supabase:', err);
     }
     setOrders(prev => prev.filter(o => o.id !== orderId));
     setMyOrderIds(prev => prev.filter(id => id !== orderId));
@@ -541,15 +639,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Clear ALL Orders for Next Day Operation (Keeps staff, cocktails, tables safe!)
+  // Clear ALL Orders for Next Day Operation
   const clearAllOrders = async () => {
     try {
-      const orderSnap = await getDocs(collection(db, 'orders'));
-      const batch = writeBatch(db);
-      orderSnap.forEach(d => batch.delete(d.ref));
-      await batch.commit();
+      // In Supabase, delete all rows from orders
+      await supabase.from('orders').delete().neq('id', '0');
     } catch (err) {
-      console.error('Failed to clear orders in Firestore:', err);
+      console.error('Failed to clear orders in Supabase:', err);
     }
 
     setOrders([]);
@@ -564,33 +660,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Reset System to Default
+  // Reset System to Default (Supabase)
   const resetToDefaultData = async () => {
     try {
-      const batch = writeBatch(db);
-      
       // Clean existing
-      const [staffSnap, cocktailSnap, tableSnap, orderSnap] = await Promise.all([
-        getDocs(collection(db, 'staff')),
-        getDocs(collection(db, 'cocktails')),
-        getDocs(collection(db, 'tables')),
-        getDocs(collection(db, 'orders'))
+      await Promise.all([
+        supabase.from('staff').delete().neq('id', '0'),
+        supabase.from('cocktails').delete().neq('id', '0'),
+        supabase.from('tables').delete().neq('id', '0'),
+        supabase.from('orders').delete().neq('id', '0')
       ]);
 
-      staffSnap.forEach(d => batch.delete(d.ref));
-      cocktailSnap.forEach(d => batch.delete(d.ref));
-      tableSnap.forEach(d => batch.delete(d.ref));
-      orderSnap.forEach(d => batch.delete(d.ref));
-
       // Re-populate initial
-      INITIAL_STAFF.forEach(s => batch.set(doc(db, 'staff', s.id), s));
-      INITIAL_COCKTAILS.forEach(c => batch.set(doc(db, 'cocktails', c.id), c));
-      INITIAL_TABLES.forEach(t => batch.set(doc(db, 'tables', t.id), t));
-      INITIAL_ORDERS.forEach(o => batch.set(doc(db, 'orders', o.id), o));
-
-      await batch.commit();
+      await Promise.all([
+        supabase.from('staff').upsert(INITIAL_STAFF),
+        supabase.from('cocktails').upsert(INITIAL_COCKTAILS),
+        supabase.from('tables').upsert(INITIAL_TABLES),
+        supabase.from('orders').upsert(INITIAL_ORDERS)
+      ]);
     } catch (err) {
-      console.error('Failed to batch reset Firestore:', err);
+      console.error('Failed to batch reset Supabase:', err);
     }
 
     setStaffList(INITIAL_STAFF);
@@ -602,7 +691,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     addNotification({
       title: '雲端系統重設完成',
-      message: '已將 Firestore 雲端資料庫之店員名單、調酒品項與示範訂單重置為官方預設值。',
+      message: '已將 Supabase 雲端資料庫之店員名單、調酒品項與示範訂單重置為官方預設值。',
       type: 'info'
     });
   };
@@ -646,7 +735,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dismissNotification,
         soundEnabled,
         setSoundEnabled,
-        isOnline
+        isOnline,
+        dbType
       }}
     >
       {children}

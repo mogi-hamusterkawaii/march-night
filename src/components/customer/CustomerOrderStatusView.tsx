@@ -24,6 +24,17 @@ export const CustomerOrderStatusView: React.FC = () => {
     ? validMyOrders 
     : (validLastPlaced ? [validLastPlaced] : []);
 
+  const formatOrderDateTime = (timestamp: number) => {
+    if (!timestamp) return '剛剛';
+    const d = new Date(timestamp);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}/${month}/${day} ${hours}:${minutes}`;
+  };
+
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
       case 'pending':
@@ -195,7 +206,9 @@ export const CustomerOrderStatusView: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-serif-luxury font-extrabold text-white text-base">
-                          {isFlair ? '🍸 花式調酒點單' : '📸 拍立得攝影服務'}
+                          {isFlair ? '🍸 花式調酒' : (
+                            itemsList.length === 1 ? itemsList[0].name : '📸 拍立得'
+                          )}
                         </span>
                         <span className="text-xs font-mono text-blue-300/70 bg-blue-900/30 px-2 py-0.5 rounded-md border border-blue-500/20">
                           #{order.orderNo || ''}
@@ -207,7 +220,7 @@ export const CustomerOrderStatusView: React.FC = () => {
                           桌位：<strong className="text-white">{order.location || '未指定'}</strong>
                         </span>
                         <span className="text-white/30">•</span>
-                        <span>下單時間：{order.createdAt ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '剛剛'}</span>
+                        <span>下單時間：{formatOrderDateTime(order.createdAt)}</span>
                         {order.guestName && (
                           <>
                             <span className="text-white/30">•</span>
@@ -284,7 +297,7 @@ export const CustomerOrderStatusView: React.FC = () => {
                             指定 C 位調酒師
                           </div>
                           <div className="text-sm font-bold text-white mt-0.5">{'centerStaffName' in order ? order.centerStaffName : '店員'}</div>
-                          {'flairTheme' in order && <div className="text-xs text-white/50">{order.flairTheme}</div>}
+                          <div className="text-xs text-blue-300/80">服務品項：花式調酒</div>
                         </div>
                       </>
                     ) : (
@@ -307,26 +320,21 @@ export const CustomerOrderStatusView: React.FC = () => {
                   <div className="space-y-2">
                     {isFlair ? (
                       <div>
-                        <div className="text-xs font-semibold text-white/80 mb-2">調酒品項明細：</div>
-                        {cocktailsList.length === 0 ? (
-                          <div className="text-xs text-white/60 py-1 flex items-center justify-between">
-                            <span>專屬 C 位花式調酒表演秀 (含現場調製)</span>
-                            <span className="text-white font-mono">{(order.totalAmount || 400000).toLocaleString()} Gil</span>
+                        <div className="text-xs font-semibold text-white/80 mb-2">服務品項：</div>
+                        <div className="text-xs text-white/90 py-1.5 flex items-center justify-between">
+                          <span className="font-bold text-white">花式調酒 ({order.guestCount} 位)</span>
+                          <span className="text-white font-mono font-bold">{(order.totalAmount || 400000).toLocaleString()} Gil</span>
+                        </div>
+                        {order.specialRequests && (
+                          <div className="mt-2 text-[11px] text-white/60 bg-white/[0.02] p-2.5 rounded-xl border border-white/5">
+                            <span className="text-white/40 mr-1">需求備註:</span>
+                            {order.specialRequests}
                           </div>
-                        ) : (
-                          cocktailsList.map((c, idx) => (
-                            <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-white/5 last:border-0">
-                              <span className="text-white/90">
-                                {c.name} <span className="text-blue-400 font-bold">x {c.quantity}</span>
-                              </span>
-                              <span className="text-white font-mono">{((c.price || 0) * c.quantity).toLocaleString()} Gil</span>
-                            </div>
-                          ))
                         )}
                       </div>
                     ) : (
                       <div>
-                        <div className="text-xs font-semibold text-white/80 mb-2">拍立得服務項目明細：</div>
+                        <div className="text-xs font-semibold text-white/80 mb-2">服務品項：</div>
                         {itemsList.map((it, idx) => (
                           <div key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-white/5 last:border-0">
                             <span className="text-white font-medium">
@@ -335,6 +343,12 @@ export const CustomerOrderStatusView: React.FC = () => {
                             <span className="text-white font-mono">{((it.price || 0) * it.quantity).toLocaleString()} Gil</span>
                           </div>
                         ))}
+                        {order.remarks && (
+                          <div className="mt-2 text-[11px] text-white/60 bg-white/[0.02] p-2.5 rounded-xl border border-white/5">
+                            <span className="text-white/40 mr-1">備註:</span>
+                            {order.remarks}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
