@@ -12,8 +12,7 @@ export const Header: React.FC = () => {
     myOrders,
     guestLocation,
     soundEnabled,
-    setSoundEnabled,
-    isAdmin
+    setSoundEnabled
   } = useApp();
 
   const myPendingOrActiveOrders = myOrders.filter(o => o.status === 'pending' || o.status === 'preparing' || o.status === 'in_service');
@@ -24,63 +23,74 @@ export const Header: React.FC = () => {
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#05070b]/85 backdrop-blur-xl border-b border-white/10 shadow-2xl">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+    <header className="sticky top-0 z-40 w-full backdrop-blur-xl bg-[#05070b]/85 border-b border-white/10 transition-all duration-300">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-4">
         
-        {/* Brand Logo & Tag */}
+        {/* Brand / Logo */}
         <div 
           onClick={() => {
-            if (mode === 'customer') setCustomerView('home');
+            if (mode === 'customer') {
+              playClickSound();
+              setCustomerView('home');
+            }
           }}
-          className="flex items-center gap-3.5 cursor-pointer group"
-          id="app-brand-logo"
+          className="flex items-center gap-3 cursor-pointer select-none group"
         >
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-[#486581] p-[1px] shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-transform duration-300 group-hover:scale-105">
-            <div className="w-full h-full bg-[#05070b] rounded-[15px] flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-blue-400" />
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-[#9FB5C3] via-[#7B95A7] to-[#4D6575] p-[1px] shadow-[0_0_20px_rgba(159,181,195,0.25)] group-hover:shadow-[0_0_25px_rgba(159,181,195,0.4)] transition-all">
+            <div className="w-full h-full bg-[#0b0f17] rounded-[15px] flex items-center justify-center overflow-hidden">
+              <span className="font-serif-luxury font-bold text-lg sm:text-xl text-white tracking-tighter">
+                參
+              </span>
             </div>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-serif-luxury text-lg tracking-[0.12em] text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-[#9cb7d1] group-hover:text-blue-300 transition-colors font-bold">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="font-serif-luxury font-bold tracking-widest text-base sm:text-lg text-white group-hover:text-blue-200 transition-colors">
                 三月森夜
               </span>
-              <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-600/15 text-[#9cb7d1] border border-blue-500/30 font-bold tracking-widest uppercase">
-                VIP
+              <span className="text-[10px] tracking-[0.2em] font-sans uppercase px-1.5 py-0.5 rounded bg-white/10 text-white/70 border border-white/10">
+                Lounge
               </span>
             </div>
-            <p className="text-[10px] tracking-[0.18em] uppercase text-white/40 mt-0.5">MARCH NIGHT • FLAIR & CHEKI</p>
+            <span className="text-[10px] tracking-[0.25em] text-[#9cb7d1]/80 font-sans uppercase">
+              MARCH NIGHT
+            </span>
           </div>
         </div>
 
-        {/* Center / Navigation Shortcuts - Only 服務首頁 & 訂單進度 */}
+        {/* Center Nav / Status Pill */}
         {mode === 'customer' ? (
-          <nav className="flex items-center gap-1.5 bg-white/[0.03] border border-white/10 p-1.5 rounded-2xl backdrop-blur-md">
+          <nav className="flex items-center gap-1 sm:gap-2">
             <button
-              onClick={() => { playClickSound(); setCustomerView('home'); }}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold tracking-wider transition-all ${
+              onClick={() => {
+                playClickSound();
+                setCustomerView('home');
+              }}
+              className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition-all ${
                 customerView === 'home'
-                  ? 'bg-blue-600/20 text-white border border-blue-500/40 shadow-sm'
+                  ? 'bg-white/10 text-white shadow-inner border border-white/15'
                   : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
-              id="nav-customer-home"
             >
-              服務首頁
+              點單首頁
             </button>
             <button
-              onClick={() => { playClickSound(); setCustomerView('orders_status'); }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold tracking-wider transition-all ${
+              onClick={() => {
+                playClickSound();
+                setCustomerView('orders_status');
+              }}
+              className={`relative px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 ${
                 customerView === 'orders_status'
-                  ? 'bg-blue-600/20 text-white border border-blue-500/40 shadow-sm'
+                  ? 'bg-blue-600/30 text-blue-200 shadow-[0_0_20px_rgba(37,99,235,0.3)] border border-blue-500/40'
                   : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
-              id="nav-customer-status"
             >
               <Bell className="w-3.5 h-3.5 text-blue-300" />
-              訂單進度
+              <span>我的點單進度</span>
               {myPendingOrActiveOrders.length > 0 && (
-                <span className="w-4 h-4 rounded-full bg-blue-500 text-white font-black text-[10px] flex items-center justify-center shadow-sm">
-                  {myPendingOrActiveOrders.length}
+                <span className="flex h-2 w-2 relative ml-0.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                 </span>
               )}
             </button>
@@ -112,8 +122,8 @@ export const Header: React.FC = () => {
             {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-300" /> : <VolumeX className="w-4 h-4 text-white/40" />}
           </button>
 
-          {/* View Switcher: Shown when already authenticated Admin */}
-          {mode === 'admin' ? (
+          {/* View Switcher: Shown ONLY when already in Admin Mode */}
+          {mode === 'admin' && (
             <button
               onClick={() => handleModeSwitch('customer')}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold tracking-wide bg-[#9FB5C3] hover:bg-[#b0c4d1] text-[#0b0f17] shadow-[0_0_15px_rgba(159,181,195,0.35)] transition-all cursor-pointer"
@@ -122,17 +132,6 @@ export const Header: React.FC = () => {
               <Utensils className="w-3.5 h-3.5" />
               <span>返回前台點餐</span>
             </button>
-          ) : (
-            isAdmin && (
-              <button
-                onClick={() => handleModeSwitch('admin')}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold tracking-wide bg-blue-600/30 hover:bg-blue-600/45 text-blue-200 border border-blue-500/40 shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all cursor-pointer"
-                id="switch-to-admin-mode"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>返回管理後台</span>
-              </button>
-            )
           )}
         </div>
       </div>

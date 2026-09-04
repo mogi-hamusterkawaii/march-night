@@ -145,6 +145,9 @@ export const FlairBartendingOrderView: React.FC = () => {
             <span className="px-3 py-0.5 rounded-full bg-blue-600/20 border border-blue-500/30 text-[#9cb7d1] text-[10px] font-bold tracking-widest uppercase">
               VIP FLAIR EXPERIENCE
             </span>
+            <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-[11px] font-mono font-bold">
+              400,000 Gil
+            </span>
           </div>
           <h1 className="font-serif-luxury text-2xl sm:text-3xl font-extrabold text-white mt-1">
             花式調酒專屬點單

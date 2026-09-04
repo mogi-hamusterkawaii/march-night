@@ -4,7 +4,7 @@ import {
   Wine, Camera, Users, Settings, Plus, Edit2, Trash2, CheckCircle2, 
   Clock, AlertCircle, Sparkles, TrendingUp, Flame, Heart, FileText, 
   RotateCcw, DollarSign, Layers, MapPin, Eye, Star, Moon, Download, Check, ShieldAlert,
-  Database, Copy, ExternalLink, LogOut
+  Database, Copy, ExternalLink
 } from 'lucide-react';
 import { playClickSound } from '../../utils/audio';
 import { Order, OrderStatus, Staff, TableLocation } from '../../types';
@@ -28,7 +28,6 @@ export const AdminDashboard: React.FC = () => {
     resetToDefaultData,
     setMode,
     setCustomerView,
-    adminLogout,
     dbType
   } = useApp();
 
@@ -65,13 +64,10 @@ export const AdminDashboard: React.FC = () => {
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
-  const supabaseSqlSchema = `-- ==============================================================================
--- 三月森夜 (MARCH NIGHT) - Supabase PostgreSQL Schema & Security Migration
+  const supabaseSqlSchema = `-- ==========================================
+-- 三月森夜 (MARCH NIGHT) Supabase PostgreSQL 資料表結構腳本
 -- 請將此段 SQL 複製並貼入 Supabase 後台的 SQL Editor 中執行 (Run)
--- ==============================================================================
-
--- 0. 啟用 UUID 擴充功能
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- ==========================================
 
 -- 1. 建立店員名冊資料表 (staff)
 CREATE TABLE IF NOT EXISTS public.staff (
@@ -80,11 +76,11 @@ CREATE TABLE IF NOT EXISTS public.staff (
   nickname TEXT,
   title TEXT,
   avatar TEXT,
-  status TEXT DEFAULT 'on_duty' CHECK (status IN ('on_duty', 'break', 'off_duty')),
+  status TEXT DEFAULT 'on_duty',
   "centerAvailability" BOOLEAN DEFAULT true,
   "flairSpecialty" TEXT,
-  "photoPriceWithoutSign" INTEGER DEFAULT 200000,
-  "photoPriceWithSign" INTEGER DEFAULT 250000,
+  "photoPriceWithoutSign" INTEGER DEFAULT 80000,
+  "photoPriceWithSign" INTEGER DEFAULT 150000,
   "photoPriceWithArtSign" INTEGER DEFAULT 300000,
   "totalCenterOrdersCount" INTEGER DEFAULT 0,
   "totalChekiCount" INTEGER DEFAULT 0
@@ -107,20 +103,20 @@ CREATE TABLE IF NOT EXISTS public.cocktails (
 CREATE TABLE IF NOT EXISTS public.tables (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  code TEXT NOT NULL UNIQUE,
+  code TEXT NOT NULL,
   area TEXT NOT NULL,
   capacity INTEGER DEFAULT 2,
   "isVip" BOOLEAN DEFAULT false,
   "isAvailable" BOOLEAN DEFAULT true
 );
 
--- 4. 建立訂單主表 (orders) - 採用 UUID 與唯一 Order Number
+-- 4. 建立訂單資料表 (orders)
 CREATE TABLE IF NOT EXISTS public.orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "orderNo" TEXT NOT NULL UNIQUE,
-  "serviceType" TEXT NOT NULL CHECK ("serviceType" IN ('flair_bartending', 'cheki_photo')),
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'preparing', 'in_service', 'completed', 'cancelled')),
-  location TEXT NOT NULL,
+  id TEXT PRIMARY KEY,
+  "orderNo" TEXT NOT NULL,
+  "serviceType" TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  location TEXT,
   "guestName" TEXT,
   "totalAmount" INTEGER DEFAULT 0,
   "createdAt" BIGINT NOT NULL,
@@ -138,78 +134,22 @@ CREATE TABLE IF NOT EXISTS public.orders (
   remarks TEXT
 );
 
--- 5. 建立訂單明細關聯表 (order_items)
-CREATE TABLE IF NOT EXISTS public.order_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID REFERENCES public.orders(id) ON DELETE CASCADE,
-  item_type TEXT NOT NULL,
-  name TEXT NOT NULL,
-  price INTEGER NOT NULL DEFAULT 0,
-  quantity INTEGER NOT NULL DEFAULT 1,
-  sub_details TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+-- 5. 啟用即時變更廣播 (Realtime)
+ALTER PUBLICATION supabase_realtime ADD TABLE staff;
+ALTER PUBLICATION supabase_realtime ADD TABLE cocktails;
+ALTER PUBLICATION supabase_realtime ADD TABLE tables;
+ALTER PUBLICATION supabase_realtime ADD TABLE orders;
 
--- 6. 效能索引
-CREATE INDEX IF NOT EXISTS idx_orders_created_at ON public.orders ("createdAt" DESC);
-CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders (status);
-CREATE INDEX IF NOT EXISTS idx_orders_order_no ON public.orders ("orderNo");
-CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items (order_id);
-
--- 7. 啟用即時變更廣播 (Realtime)
-ALTER PUBLICATION supabase_realtime ADD TABLE public.staff;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.cocktails;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.tables;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
-
--- 8. 啟用 Row Level Security (RLS)
+-- 6. 設定存取權限 (若有啟用 RLS)
 ALTER TABLE public.staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cocktails ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tables ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 
--- 9. 安全存取政策 (RLS Policies)
--- 店員名冊：訪客公開讀取，管理員完整讀寫
-DROP POLICY IF EXISTS "staff_read_public" ON public.staff;
-CREATE POLICY "staff_read_public" ON public.staff FOR SELECT TO public USING (true);
-DROP POLICY IF EXISTS "staff_admin_all" ON public.staff;
-CREATE POLICY "staff_admin_all" ON public.staff FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
--- 調酒菜單：訪客公開讀取，管理員完整讀寫
-DROP POLICY IF EXISTS "cocktails_read_public" ON public.cocktails;
-CREATE POLICY "cocktails_read_public" ON public.cocktails FOR SELECT TO public USING (true);
-DROP POLICY IF EXISTS "cocktails_admin_all" ON public.cocktails;
-CREATE POLICY "cocktails_admin_all" ON public.cocktails FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
--- 桌位資料：訪客公開讀取，管理員完整讀寫
-DROP POLICY IF EXISTS "tables_read_public" ON public.tables;
-CREATE POLICY "tables_read_public" ON public.tables FOR SELECT TO public USING (true);
-DROP POLICY IF EXISTS "tables_admin_all" ON public.tables;
-CREATE POLICY "tables_admin_all" ON public.tables FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
--- 訂單：訪客僅能建立訂單 (INSERT)；只有已認證管理員可檢視全部、更新與刪除
-DROP POLICY IF EXISTS "orders_insert_public" ON public.orders;
-CREATE POLICY "orders_insert_public" ON public.orders FOR INSERT TO public WITH CHECK (true);
-DROP POLICY IF EXISTS "orders_select_admin" ON public.orders;
-CREATE POLICY "orders_select_admin" ON public.orders FOR SELECT TO authenticated USING (true);
-DROP POLICY IF EXISTS "orders_update_admin" ON public.orders;
-CREATE POLICY "orders_update_admin" ON public.orders FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-DROP POLICY IF EXISTS "orders_delete_admin" ON public.orders;
-CREATE POLICY "orders_delete_admin" ON public.orders FOR DELETE TO authenticated USING (true);
-
--- 10. 客人專屬安全查詢函式 (Security Definer RPC - 防範全表爬取)
-CREATE OR REPLACE FUNCTION public.get_guest_orders_by_text(order_ids text[])
-RETURNS SETOF public.orders
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT * FROM public.orders 
-  WHERE id::text = ANY(order_ids);
-$$;
-
-GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authenticated;
+CREATE POLICY "Allow public all access on staff" ON public.staff FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on cocktails" ON public.cocktails FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on tables" ON public.tables FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on orders" ON public.orders FOR ALL USING (true) WITH CHECK (true);
 `;
 
   const copySqlToClipboard = () => {
@@ -388,20 +328,6 @@ GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authe
             <Wine className="w-4 h-4" />
             <span>切換回客人前台</span>
           </button>
-
-          <button
-            onClick={async () => {
-              if (window.confirm('確定要安全登出管理員身分並返回前台嗎？')) {
-                playClickSound();
-                await adminLogout();
-              }
-            }}
-            className="px-3.5 py-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
-            title="登出管理員帳號"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>登出後台</span>
-          </button>
           
           <button
             onClick={() => {
@@ -556,7 +482,7 @@ GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authe
                 }`}
               >
                 <Wine className="w-3.5 h-3.5" />
-                🍸 花式調酒
+                <span>🍸 花式調酒 (400,000 Gil)</span>
               </button>
               <button
                 onClick={() => setServiceFilter('without_sign')}
@@ -565,7 +491,7 @@ GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authe
                 }`}
               >
                 <Camera className="w-3.5 h-3.5" />
-                📷 拍立得(無簽)
+                <span>📷 拍立得(無簽) (80,000 Gil)</span>
               </button>
               <button
                 onClick={() => setServiceFilter('with_sign')}
@@ -574,7 +500,7 @@ GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authe
                 }`}
               >
                 <Camera className="w-3.5 h-3.5" />
-                ✒️ 拍立得(有簽)
+                <span>✒️ 拍立得(有簽) (150,000 Gil)</span>
               </button>
               <button
                 onClick={() => setServiceFilter('with_art_sign')}
@@ -583,7 +509,7 @@ GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authe
                 }`}
               >
                 <Camera className="w-3.5 h-3.5" />
-                🎨 拍立得(簽繪)
+                <span>🎨 拍立得(簽繪) (300,000 Gil)</span>
               </button>
             </div>
 
@@ -1112,7 +1038,7 @@ GRANT EXECUTE ON FUNCTION public.get_guest_orders_by_text(text[]) TO anon, authe
                         <div>
                           <div className="font-bold text-white text-xs">{staff.name} ({staff.nickname})</div>
                           <div className="text-[10px] text-[#9cb7d1]">
-                            簽繪: {(staff.chekiServices?.with_art_sign?.price ?? 300000).toLocaleString()} Gil / 有簽: {(staff.chekiServices?.with_sign?.price ?? 150000).toLocaleString()} Gil
+                            無簽: {(staff.chekiServices?.without_sign?.price ?? 80000).toLocaleString()} / 有簽: {(staff.chekiServices?.with_sign?.price ?? 150000).toLocaleString()} / 簽繪: {(staff.chekiServices?.with_art_sign?.price ?? 300000).toLocaleString()} Gil
                           </div>
                         </div>
                       </div>

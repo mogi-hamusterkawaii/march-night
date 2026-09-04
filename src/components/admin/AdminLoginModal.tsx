@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Lock, Eye, EyeOff, X, KeyRound, AlertCircle, Mail } from 'lucide-react';
+import { ShieldCheck, Lock, Eye, EyeOff, X, KeyRound, AlertCircle } from 'lucide-react';
 import { playClickSound, playOrderSuccessSound } from '../../utils/audio';
-import { supabase } from '../../lib/supabase';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -14,13 +13,12 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const [email, setEmail] = useState('admin@marchnight.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -28,71 +26,42 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       setError(false);
       setErrorMessage('');
       setTimeout(() => {
-        passwordInputRef.current?.focus();
+        inputRef.current?.focus();
       }, 100);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     playClickSound();
 
-    if (!email.trim()) {
-      setError(true);
-      setErrorMessage('請輸入管理員信箱帳號');
-      return;
-    }
-
     if (!password.trim()) {
       setError(true);
-      setErrorMessage('請輸入管理員安全密碼');
-      passwordInputRef.current?.focus();
+      setErrorMessage('請輸入管理員密碼');
+      inputRef.current?.focus();
       return;
     }
 
     setIsSubmitting(true);
-    setError(false);
-    setErrorMessage('');
 
-    try {
-      // Authenticate directly via Supabase Auth
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password: password
-      });
-
-      if (authError) {
-        setError(true);
-        if (authError.message.includes('Invalid login credentials')) {
-          setErrorMessage('登入失敗：管理員信箱或密碼錯誤。請確認已在 Supabase 後台 Authentication 建立此帳號。');
-        } else if (authError.message.includes('Email not confirmed')) {
-          setErrorMessage('登入失敗：該管理員信箱尚未驗證。請在 Supabase Dashboard 將信箱標記為確認 (Auto-confirm)。');
-        } else {
-          setErrorMessage(`登入失敗：${authError.message}`);
-        }
-        setIsSubmitting(false);
-        setPassword('');
-        passwordInputRef.current?.focus();
-        return;
-      }
-
-      if (data.session) {
+    // Verify Password: 35queen53
+    setTimeout(() => {
+      if (password === '35queen53') {
         playOrderSuccessSound();
         setError(false);
         setPassword('');
         setIsSubmitting(false);
         onSuccess();
       } else {
-        throw new Error('未能建立有效的管理員驗證階段');
+        setError(true);
+        setErrorMessage('驗證密碼錯誤，請重新輸入');
+        setIsSubmitting(false);
+        setPassword('');
+        inputRef.current?.focus();
       }
-    } catch (err: any) {
-      console.error('Supabase auth login error:', err);
-      setError(true);
-      setErrorMessage(err.message || '連線驗證伺服器失敗，請稍後重試');
-      setIsSubmitting(false);
-    }
+    }, 200);
   };
 
   return (
@@ -119,13 +88,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             <Lock className="w-7 h-7" />
           </div>
           <span className="px-3 py-0.5 rounded-full bg-blue-600/15 text-[#9cb7d1] border border-blue-500/30 text-[10px] font-bold uppercase tracking-[0.2em]">
-            SUPABASE AUTH PROTECTED
+            STAFF ACCESS ONLY
           </span>
           <h3 className="font-serif-luxury font-bold text-xl text-white mt-2">
-            三月森夜 後台權限登入
+            三月森夜 後台權限驗證
           </h3>
           <p className="text-xs text-white/50 mt-1 max-w-xs mx-auto">
-            使用 Supabase 雲端管理員身分安全驗證以啟用後台調度與數據存取
+            請輸入管理人員密碼以進入即時調度與營收管理系統
           </p>
         </div>
 
@@ -133,43 +102,21 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className="block text-xs font-semibold text-white/80 mb-2">
-              管理員帳號信箱 (Supabase Auth Email)
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
-                <Mail className="w-4 h-4" />
-              </div>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (error) setError(false);
-                }}
-                placeholder="admin@marchnight.com"
-                autoComplete="email"
-                className="w-full pl-10 pr-4 py-2.5 bg-white/[0.04] border border-white/15 focus:border-blue-400 focus:bg-white/[0.07] rounded-2xl text-white text-sm focus:outline-none transition-all placeholder:text-white/20 font-mono shadow-inner"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-white/80 mb-2">
-              管理員密碼 (Password)
+              管理員安全密碼
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
                 <KeyRound className="w-4 h-4" />
               </div>
               <input
-                ref={passwordInputRef}
+                ref={inputRef}
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
                   if (error) setError(false);
                 }}
-                placeholder="請輸入 Supabase 管理員密碼"
+                placeholder="請輸入後台密碼"
                 autoComplete="current-password"
                 className={`w-full pl-10 pr-11 py-3 bg-white/[0.04] border rounded-2xl text-white text-sm focus:outline-none transition-all placeholder:text-white/20 font-mono ${
                   error 
@@ -187,8 +134,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             </div>
 
             {error && (
-              <div className="flex items-start gap-1.5 text-rose-400 text-xs mt-2.5 animate-shake bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="flex items-center gap-1.5 text-rose-400 text-xs mt-2 animate-shake">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                 <span>{errorMessage}</span>
               </div>
             )}
@@ -211,7 +158,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               className="flex-1 py-3 rounded-2xl bg-[#9FB5C3] hover:bg-[#b0c4d1] text-[#0b0f17] font-bold text-xs shadow-[0_0_20px_rgba(159,181,195,0.35)] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>{isSubmitting ? '驗證登入中...' : '登入後台'}</span>
+              <span>{isSubmitting ? '正在驗證...' : '解鎖並進入後台'}</span>
             </button>
           </div>
         </form>

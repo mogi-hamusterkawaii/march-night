@@ -94,6 +94,9 @@ export const HomeSelection: React.FC = () => {
               <div className="w-14 h-14 rounded-2xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-300 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(37,99,235,0.3)]">
                 <Flame className="w-7 h-7" />
               </div>
+              <span className="px-3.5 py-1.5 rounded-full bg-blue-600/25 border border-blue-500/40 text-blue-200 font-mono font-bold text-xs tracking-wider">
+                400,000 Gil
+              </span>
             </div>
 
             <h2 className="font-serif-luxury text-2xl sm:text-3xl font-bold text-white group-hover:text-blue-200 transition-colors flex items-center gap-2.5">
@@ -115,9 +118,9 @@ export const HomeSelection: React.FC = () => {
                 <div className="text-blue-300 font-bold text-xs">指定C位</div>
                 <div className="text-[10px] text-white/50 mt-0.5">專屬調酒師出秀</div>
               </div>
-              <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-3 text-center">
-                <div className="text-blue-300 font-bold text-xs">專屬演出</div>
-                <div className="text-[10px] text-white/50 mt-0.5">專屬近距離互動</div>
+              <div className="bg-blue-600/20 border border-blue-500/40 rounded-2xl p-3 text-center">
+                <div className="text-blue-300 font-bold text-xs">每場定價</div>
+                <div className="text-white font-mono font-bold text-xs mt-0.5">400,000 Gil</div>
               </div>
             </div>
           </div>
@@ -147,6 +150,9 @@ export const HomeSelection: React.FC = () => {
               <div className="w-14 h-14 rounded-2xl bg-[#5c7c99]/20 border border-[#6e8ca6]/40 flex items-center justify-center text-[#9cb7d1] group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(110,140,166,0.25)]">
                 <Camera className="w-7 h-7" />
               </div>
+              <span className="px-3.5 py-1.5 rounded-full bg-[#5c7c99]/25 border border-[#6e8ca6]/40 text-[#9cb7d1] font-mono font-bold text-xs tracking-wider">
+                80,000 ~ 300,000 Gil
+              </span>
             </div>
 
             <h2 className="font-serif-luxury text-2xl sm:text-3xl font-bold text-white group-hover:text-[#9cb7d1] transition-colors flex items-center gap-2.5">
@@ -162,15 +168,15 @@ export const HomeSelection: React.FC = () => {
             <div className="grid grid-cols-3 gap-2.5 mt-6">
               <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-3 text-center">
                 <div className="text-[#9cb7d1] font-bold text-xs">拍立得 (無簽)</div>
-                <div className="text-[10px] text-white/50 mt-0.5">經典合照留念</div>
+                <div className="text-white font-mono font-bold text-xs mt-1">80,000 Gil</div>
               </div>
               <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-3 text-center">
                 <div className="text-[#9cb7d1] font-bold text-xs">拍立得 (有簽)</div>
-                <div className="text-[10px] text-white/50 mt-0.5">親筆署名寄語</div>
+                <div className="text-white font-mono font-bold text-xs mt-1">150,000 Gil</div>
               </div>
               <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-3 text-center">
                 <div className="text-[#9cb7d1] font-bold text-xs">拍立得 (簽繪)</div>
-                <div className="text-[10px] text-white/50 mt-0.5">專屬手繪彩繪</div>
+                <div className="text-white font-mono font-bold text-xs mt-1">300,000 Gil</div>
               </div>
             </div>
           </div>

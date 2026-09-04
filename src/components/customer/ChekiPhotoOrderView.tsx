@@ -214,9 +214,14 @@ export const ChekiPhotoOrderView: React.FC = () => {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <span className="px-3 py-0.5 rounded-full bg-blue-600/20 border border-blue-500/30 text-[#9cb7d1] text-[10px] font-bold tracking-widest uppercase">
-              CHEKI PHOTO SERVICE
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-0.5 rounded-full bg-blue-600/20 border border-blue-500/30 text-[#9cb7d1] text-[10px] font-bold tracking-widest uppercase">
+                CHEKI PHOTO SERVICE
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-[#5c7c99]/20 border border-[#6e8ca6]/30 text-[#9cb7d1] text-[11px] font-mono font-bold">
+                80,000 ~ 300,000 Gil
+              </span>
+            </div>
             <h1 className="font-serif-luxury text-2xl sm:text-3xl font-extrabold text-white mt-1">
               拍立得攝影服務
             </h1>
