@@ -274,7 +274,7 @@ export const FLAIR_THEMES = [
 
 export const INITIAL_ORDERS: Order[] = [
   {
-    id: 'order-101',
+    id: 'e1000000-0000-4000-8000-000000000101',
     orderNo: 'FL-20260829-01',
     serviceType: 'flair_bartending',
     guestCount: 4,
@@ -291,7 +291,7 @@ export const INITIAL_ORDERS: Order[] = [
     totalAmount: 400000
   },
   {
-    id: 'order-102',
+    id: 'e2000000-0000-4000-8000-000000000102',
     orderNo: 'CK-20260829-02',
     serviceType: 'cheki_photo',
     staffId: 'staff-2',
@@ -309,7 +309,7 @@ export const INITIAL_ORDERS: Order[] = [
     totalAmount: 460000
   },
   {
-    id: 'order-103',
+    id: 'e3000000-0000-4000-8000-000000000103',
     orderNo: 'CK-20260829-03',
     serviceType: 'cheki_photo',
     staffId: 'staff-4',

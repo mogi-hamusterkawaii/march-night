@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Staff, CocktailItem, TableLocation, Order, OrderStatus, AppNotification, FlairBartendingOrder, ChekiPhotoOrder } from '../types';
 import { INITIAL_STAFF, INITIAL_COCKTAILS, INITIAL_TABLES, INITIAL_ORDERS } from '../data/initialData';
 import { playOrderSuccessSound, playStatusUpdateSound } from '../utils/audio';
@@ -260,8 +260,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // REAL-TIME SUPABASE POSTGRESQL SYNCHRONIZATION
   // ==========================================
 
-  // Helper to fetch all data from Supabase
-  const loadInitialDataFromSupabase = async () => {
+  // 1. Fetch initial catalog data (Staff, Cocktails, Tables)
+  const loadInitialCatalogFromSupabase = async () => {
     try {
       // 1. Fetch Staff
       const { data: staffData, error: staffErr } = await supabase.from('staff').select('*');
@@ -307,46 +307,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // 4. Fetch Orders
-      const { data: orderData, error: orderErr } = await supabase.from('orders').select('*').order('createdAt', { ascending: false });
-      if (orderErr) {
-        console.warn('Supabase orders fetch error:', orderErr.message);
-      } else if (orderData) {
-        setOrders(orderData.map(normalizeOrder));
-      }
-
       setIsOnline(true);
     } catch (err) {
-      console.warn('Supabase connection or initialization error:', err);
+      console.warn('Supabase catalog initialization error:', err);
     }
   };
 
-  useEffect(() => {
-    loadInitialDataFromSupabase();
-
-    // Setup Supabase Realtime Subscriptions
-    const channel = supabase
-      .channel('schema-db-changes')
-      // Listen to Orders
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newOrder = normalizeOrder(payload.new);
-            setOrders(prev => {
-              if (prev.some(o => o.id === newOrder.id)) return prev;
-              return [newOrder, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = normalizeOrder(payload.new);
-            setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id: string }).id;
-            setOrders(prev => prev.filter(o => o.id !== deletedId));
-          }
+  // 2. Query Orders based on user role (Customer vs Admin)
+  const fetchOrders = useCallback(async (currentMode: 'customer' | 'admin', currentMyOrderIds: string[]) => {
+    try {
+      if (currentMode === 'admin') {
+        // 管理員後台：讀取全部訂單
+        const { data: orderData, error: orderErr } = await supabase
+          .from('orders')
+          .select('*')
+          .order('createdAt', { ascending: false });
+        if (orderErr) {
+          console.warn('Supabase admin orders fetch error:', orderErr.message);
+        } else if (orderData) {
+          setOrders(orderData.map(normalizeOrder));
         }
-      )
+      } else {
+        // 客人端：嚴格禁止 .select('*') 下載全店訂單！
+        // 先讀取本地儲存的 myOrderIds，若無訂單則直接設為空陣列，不向 orders table 發出查詢
+        if (!currentMyOrderIds || currentMyOrderIds.length === 0) {
+          setOrders([]);
+          return;
+        }
+        // 只向 Supabase 查詢這台裝置自己的指定 order id
+        const { data: orderData, error: orderErr } = await supabase
+          .from('orders')
+          .select('*')
+          .in('id', currentMyOrderIds)
+          .order('createdAt', { ascending: false });
+        if (orderErr) {
+          console.warn('Supabase customer orders fetch error:', orderErr.message);
+        } else if (orderData) {
+          setOrders(orderData.map(normalizeOrder));
+        }
+      }
+    } catch (err) {
+      console.warn('Fetch orders error:', err);
+    }
+  }, []);
+
+  // Fetch orders whenever mode changes or myOrderIds changes
+  const myOrderIdsKey = myOrderIds.join(',');
+  useEffect(() => {
+    fetchOrders(mode, myOrderIds);
+  }, [mode, myOrderIdsKey, fetchOrders]);
+
+  // Catalog Realtime Subscriptions (Staff, Cocktails, Tables)
+  useEffect(() => {
+    loadInitialCatalogFromSupabase();
+
+    const catalogChannel = supabase
+      .channel('catalog-db-changes')
       // Listen to Staff
       .on(
         'postgres_changes',
@@ -402,9 +418,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(catalogChannel);
     };
   }, []);
+
+  // Orders Realtime Subscription: Role-Based (Customer vs Admin)
+  useEffect(() => {
+    if (mode === 'admin') {
+      // 管理員模式：監聽整張 orders 表的所有變更事件
+      const adminOrdersChannel = supabase
+        .channel('admin-orders-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'orders' },
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newOrder = normalizeOrder(payload.new);
+              setOrders(prev => {
+                if (prev.some(o => o.id === newOrder.id)) return prev;
+                return [newOrder, ...prev];
+              });
+            } else if (payload.eventType === 'UPDATE') {
+              const updated = normalizeOrder(payload.new);
+              setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
+            } else if (payload.eventType === 'DELETE') {
+              const deletedId = (payload.old as { id: string }).id;
+              setOrders(prev => prev.filter(o => o.id !== deletedId));
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(adminOrdersChannel);
+      };
+    } else {
+      // 客人模式：絕不無條件監聽整張 orders 表！
+      // 若本機目前無任何訂單，則完全不註冊 orders 監聽
+      if (!myOrderIds || myOrderIds.length === 0) {
+        return;
+      }
+
+      // 根據 myOrderIds 為這台裝置自己的每一筆訂單設定精確的 filter
+      const channelName = `customer-orders-${myOrderIds.slice(0, 3).join('-')}`;
+      const customerOrdersChannel = supabase.channel(channelName);
+
+      myOrderIds.forEach(orderId => {
+        customerOrdersChannel.on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'orders',
+            filter: `id=eq.${orderId}`
+          },
+          (payload) => {
+            const targetId = (payload.new as any)?.id || (payload.old as any)?.id;
+            // 雙重安全防護：嚴格檢查是否屬於這台裝置的 myOrderIds，絕不將其他客人的訂單存入 state
+            if (!targetId || !myOrderIds.includes(targetId)) return;
+
+            if (payload.eventType === 'UPDATE') {
+              const updated = normalizeOrder(payload.new);
+              setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
+              setLastPlacedOrder(prev => (prev && prev.id === updated.id ? updated : prev));
+            } else if (payload.eventType === 'DELETE') {
+              setOrders(prev => prev.filter(o => o.id !== targetId));
+              setLastPlacedOrder(prev => (prev && prev.id === targetId ? null : prev));
+            }
+          }
+        );
+      });
+
+      customerOrdersChannel.subscribe();
+
+      return () => {
+        supabase.removeChannel(customerOrdersChannel);
+      };
+    }
+  }, [mode, myOrderIdsKey]);
 
   // Filter orders for the current guest
   const myOrders = orders.filter(o => myOrderIds.includes(o.id));
@@ -412,6 +503,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ==========================================
   // ORDER ACTIONS (SUPABASE INTEGRATION)
   // ==========================================
+
+  // Helper for generating standard UUIDs
+  const generateUUID = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
 
   const addFlairOrder = async (data: {
     guestCount: number;
@@ -428,7 +531,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const timestamp = Date.now();
     const orderNo = `FL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
     const newOrder: FlairBartendingOrder = {
-      id: 'order-' + timestamp,
+      id: generateUUID(),
       orderNo,
       serviceType: 'flair_bartending',
       guestCount: data.guestCount,
@@ -489,7 +592,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const timestamp = Date.now();
     const orderNo = `CK-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
     const newOrder: ChekiPhotoOrder = {
-      id: 'order-' + timestamp,
+      id: generateUUID(),
       orderNo,
       serviceType: 'cheki_photo',
       staffId: data.staffId,
@@ -687,7 +790,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearAllOrders = async () => {
     try {
       // In Supabase, delete all rows from orders
-      await supabase.from('orders').delete().neq('id', '0');
+      await supabase.from('orders').delete().not('id', 'is', null);
     } catch (err) {
       console.error('Failed to clear orders in Supabase:', err);
     }
@@ -712,7 +815,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supabase.from('staff').delete().neq('id', '0'),
         supabase.from('cocktails').delete().neq('id', '0'),
         supabase.from('tables').delete().neq('id', '0'),
-        supabase.from('orders').delete().neq('id', '0')
+        supabase.from('orders').delete().not('id', 'is', null)
       ]);
 
       // Re-populate initial

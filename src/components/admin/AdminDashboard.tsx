@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS public.tables (
 
 -- 4. 建立訂單資料表 (orders)
 CREATE TABLE IF NOT EXISTS public.orders (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "orderNo" TEXT NOT NULL,
   "serviceType" TEXT NOT NULL,
   status TEXT DEFAULT 'pending',
