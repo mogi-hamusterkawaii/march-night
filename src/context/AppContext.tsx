@@ -340,10 +340,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .select('*')
           .in('id', currentMyOrderIds)
           .order('createdAt', { ascending: false });
+
         if (orderErr) {
           console.warn('Supabase customer orders fetch error:', orderErr.message);
-        } else if (orderData) {
-          setOrders(orderData.map(normalizeOrder));
+          return;
+        }
+
+        const validOrders = (orderData || []).map(normalizeOrder);
+        setOrders(validOrders);
+
+        // 比較查詢結果：找出 Supabase 中實際仍然存在的訂單 UUID
+        const existingIds = new Set(validOrders.map(o => o.id));
+        const activeMyOrderIds = currentMyOrderIds.filter(id => existingIds.has(id));
+
+        // 若有已經在 Supabase 被刪除或清空的舊訂單 UUID，自動同步清理 myOrderIds 與 localStorage
+        if (activeMyOrderIds.length !== currentMyOrderIds.length) {
+          setMyOrderIds(activeMyOrderIds);
+          if (activeMyOrderIds.length > 0) {
+            localStorage.setItem('lounge_my_order_ids', JSON.stringify(activeMyOrderIds));
+          } else {
+            localStorage.removeItem('lounge_my_order_ids');
+          }
+          // 同步清理不存在的 lastPlacedOrder
+          setLastPlacedOrder(prev => (prev && existingIds.has(prev.id) ? prev : null));
         }
       }
     } catch (err) {
@@ -516,6 +535,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // 產生符合 Asia/Taipei (UTC+8) 當地日期與 4 位亂數 (1000-9999) 之訂單顯示編號
+  const generateTaiwanOrderNo = (prefix: 'FL' | 'CK'): string => {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Taipei',
+      year: '2-digit',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(new Date());
+    const year = parts.find(p => p.type === 'year')?.value || '26';
+    const month = parts.find(p => p.type === 'month')?.value || '01';
+    const day = parts.find(p => p.type === 'day')?.value || '01';
+    const random4 = Math.floor(1000 + Math.random() * 9000);
+    return `${prefix}-${year}${month}${day}-${random4}`;
+  };
+
   const addFlairOrder = async (data: {
     guestCount: number;
     location: string;
@@ -529,7 +564,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     totalAmount: number;
   }): Promise<FlairBartendingOrder> => {
     const timestamp = Date.now();
-    const orderNo = `FL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+    const orderNo = generateTaiwanOrderNo('FL');
     const newOrder: FlairBartendingOrder = {
       id: generateUUID(),
       orderNo,
@@ -548,21 +583,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalAmount: data.totalAmount
     };
 
-    // Save to Supabase
-    try {
-      await supabase.from('orders').insert(newOrder);
-
-      // Update staff performance count in Supabase
-      const targetStaff = staffList.find(s => s.id === data.centerStaffId);
-      if (targetStaff) {
-        const newCount = (targetStaff.totalCenterOrdersCount || 0) + 1;
-        await supabase.from('staff').update({ totalCenterOrdersCount: newCount }).eq('id', targetStaff.id);
-      }
-    } catch (err) {
-      console.error('Failed to sync flair order to Supabase:', err);
+    // 1. 寫入 Supabase orders 表，並嚴格確認 error
+    const { error: orderError } = await supabase.from('orders').insert(newOrder);
+    if (orderError) {
+      console.error('Supabase flair order insert error:', orderError);
+      throw new Error('訂單送出失敗，請稍後再試。');
     }
 
-    // Local state updates
+    // 2. 若有指定 C 位店員，更新店員表演次數
+    const targetStaff = staffList.find(s => s.id === data.centerStaffId);
+    if (targetStaff) {
+      const newCount = (targetStaff.totalCenterOrdersCount || 0) + 1;
+      const { error: staffErr } = await supabase
+        .from('staff')
+        .update({ totalCenterOrdersCount: newCount })
+        .eq('id', targetStaff.id);
+      if (staffErr) {
+        console.warn('Supabase staff count update error:', staffErr);
+      }
+    }
+
+    // 3. 只有在 Supabase 確認寫入成功後，才執行本機狀態更新與音效
     setOrders(prev => [newOrder, ...prev]);
     setMyOrderIds(prev => [newOrder.id, ...prev]);
     setLastPlacedOrder(newOrder);
@@ -590,7 +631,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     totalAmount: number;
   }): Promise<ChekiPhotoOrder> => {
     const timestamp = Date.now();
-    const orderNo = `CK-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+    const orderNo = generateTaiwanOrderNo('CK');
     const newOrder: ChekiPhotoOrder = {
       id: generateUUID(),
       orderNo,
@@ -609,20 +650,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const totalQty = data.items.reduce((acc, i) => acc + i.quantity, 0);
 
-    // Save to Supabase
-    try {
-      await supabase.from('orders').insert(newOrder);
-      
-      const targetStaff = staffList.find(s => s.id === data.staffId);
-      if (targetStaff) {
-        const newTotalCheki = (targetStaff.totalChekiCount || 0) + totalQty;
-        await supabase.from('staff').update({ totalChekiCount: newTotalCheki }).eq('id', targetStaff.id);
-      }
-    } catch (err) {
-      console.error('Failed to sync cheki order to Supabase:', err);
+    // 1. 寫入 Supabase orders 表，並嚴格確認 error
+    const { error: orderError } = await supabase.from('orders').insert(newOrder);
+    if (orderError) {
+      console.error('Supabase cheki order insert error:', orderError);
+      throw new Error('訂單送出失敗，請稍後再試。');
     }
 
-    // Local state updates
+    // 2. 若有指定店員，更新店員拍照張數
+    const targetStaff = staffList.find(s => s.id === data.staffId);
+    if (targetStaff) {
+      const newTotalCheki = (targetStaff.totalChekiCount || 0) + totalQty;
+      const { error: staffErr } = await supabase
+        .from('staff')
+        .update({ totalChekiCount: newTotalCheki })
+        .eq('id', targetStaff.id);
+      if (staffErr) {
+        console.warn('Supabase staff cheki count update error:', staffErr);
+      }
+    }
+
+    // 3. 只有在 Supabase 確認寫入成功後，才執行本機狀態更新與音效
     setOrders(prev => [newOrder, ...prev]);
     setMyOrderIds(prev => [newOrder.id, ...prev]);
     setLastPlacedOrder(newOrder);
@@ -640,10 +688,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
-    try {
-      await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
-    } catch (err) {
-      console.error('Failed to update status in Supabase:', err);
+    const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
+    if (error) {
+      console.error('Failed to update status in Supabase:', error);
+      addNotification({
+        title: '狀態更新失敗',
+        message: error.message || '無法同步更新至雲端資料庫',
+        type: 'info'
+      });
+      throw error;
     }
 
     setOrders(prev => prev.map(order => {
@@ -676,10 +729,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Staff Management (Supabase)
   const updateStaff = async (updated: Staff) => {
-    try {
-      await supabase.from('staff').upsert(serializeStaffForSupabase(updated));
-    } catch (err) {
-      console.error('Failed to update staff in Supabase:', err);
+    const { error } = await supabase.from('staff').upsert(serializeStaffForSupabase(updated));
+    if (error) {
+      console.error('Failed to update staff in Supabase:', error);
+      addNotification({
+        title: '店員資料更新失敗',
+        message: error.message || '請檢查網路連線',
+        type: 'info'
+      });
+      throw error;
     }
     setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s));
   };
@@ -691,29 +749,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalCenterOrdersCount: 0,
       totalChekiCount: 0
     };
-    try {
-      await supabase.from('staff').insert(serializeStaffForSupabase(newStaff));
-    } catch (err) {
-      console.error('Failed to add staff to Supabase:', err);
+    const { error } = await supabase.from('staff').insert(serializeStaffForSupabase(newStaff));
+    if (error) {
+      console.error('Failed to add staff to Supabase:', error);
+      addNotification({
+        title: '新增店員失敗',
+        message: error.message || '請檢查網路連線',
+        type: 'info'
+      });
+      throw error;
     }
     setStaffList(prev => [...prev, newStaff]);
   };
 
   const deleteStaff = async (id: string) => {
-    try {
-      await supabase.from('staff').delete().eq('id', id);
-    } catch (err) {
-      console.error('Failed to delete staff in Supabase:', err);
+    const { error } = await supabase.from('staff').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete staff in Supabase:', error);
+      addNotification({
+        title: '刪除店員失敗',
+        message: error.message || '請檢查網路連線',
+        type: 'info'
+      });
+      throw error;
     }
     setStaffList(prev => prev.filter(s => s.id !== id));
   };
 
   // Cocktails Management (Supabase)
   const updateCocktail = async (item: CocktailItem) => {
-    try {
-      await supabase.from('cocktails').upsert(item);
-    } catch (err) {
-      console.error('Failed to update cocktail in Supabase:', err);
+    const { error } = await supabase.from('cocktails').upsert(item);
+    if (error) {
+      console.error('Failed to update cocktail in Supabase:', error);
+      throw error;
     }
     setCocktails(prev => prev.map(c => c.id === item.id ? item : c));
   };
@@ -723,29 +791,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...item,
       id: 'cocktail-' + Date.now()
     };
-    try {
-      await supabase.from('cocktails').insert(newItem);
-    } catch (err) {
-      console.error('Failed to add cocktail in Supabase:', err);
+    const { error } = await supabase.from('cocktails').insert(newItem);
+    if (error) {
+      console.error('Failed to add cocktail in Supabase:', error);
+      throw error;
     }
     setCocktails(prev => [...prev, newItem]);
   };
 
   const deleteCocktail = async (id: string) => {
-    try {
-      await supabase.from('cocktails').delete().eq('id', id);
-    } catch (err) {
-      console.error('Failed to delete cocktail in Supabase:', err);
+    const { error } = await supabase.from('cocktails').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete cocktail in Supabase:', error);
+      throw error;
     }
     setCocktails(prev => prev.filter(c => c.id !== id));
   };
 
   // Tables Management (Supabase)
   const updateTable = async (table: TableLocation) => {
-    try {
-      await supabase.from('tables').upsert(table);
-    } catch (err) {
-      console.error('Failed to update table in Supabase:', err);
+    const { error } = await supabase.from('tables').upsert(table);
+    if (error) {
+      console.error('Failed to update table in Supabase:', error);
+      throw error;
     }
     setTables(prev => prev.map(t => t.id === table.id ? table : t));
   };
@@ -755,29 +823,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...table,
       id: 'loc-' + Date.now()
     };
-    try {
-      await supabase.from('tables').insert(newTable);
-    } catch (err) {
-      console.error('Failed to add table in Supabase:', err);
+    const { error } = await supabase.from('tables').insert(newTable);
+    if (error) {
+      console.error('Failed to add table in Supabase:', error);
+      throw error;
     }
     setTables(prev => [...prev, newTable]);
   };
 
   const deleteTable = async (id: string) => {
-    try {
-      await supabase.from('tables').delete().eq('id', id);
-    } catch (err) {
-      console.error('Failed to delete table in Supabase:', err);
+    const { error } = await supabase.from('tables').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete table in Supabase:', error);
+      throw error;
     }
     setTables(prev => prev.filter(t => t.id !== id));
   };
 
   // Single Order Deletion (Supabase)
   const deleteSingleOrder = async (orderId: string) => {
-    try {
-      await supabase.from('orders').delete().eq('id', orderId);
-    } catch (err) {
-      console.error('Failed to delete order in Supabase:', err);
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) {
+      console.error('Failed to delete order in Supabase:', error);
+      addNotification({
+        title: '刪除訂單失敗',
+        message: error.message || '請稍後再試',
+        type: 'info'
+      });
+      throw error;
     }
     setOrders(prev => prev.filter(o => o.id !== orderId));
     setMyOrderIds(prev => prev.filter(id => id !== orderId));
@@ -788,11 +861,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Clear ALL Orders for Next Day Operation
   const clearAllOrders = async () => {
-    try {
-      // In Supabase, delete all rows from orders
-      await supabase.from('orders').delete().not('id', 'is', null);
-    } catch (err) {
-      console.error('Failed to clear orders in Supabase:', err);
+    const { error } = await supabase.from('orders').delete().not('id', 'is', null);
+    if (error) {
+      console.error('Failed to clear orders in Supabase:', error);
+      addNotification({
+        title: '清空失敗',
+        message: error.message || '請稍後再試',
+        type: 'info'
+      });
+      throw error;
     }
 
     setOrders([]);
@@ -811,36 +888,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const resetToDefaultData = async () => {
     try {
       // Clean existing
-      await Promise.all([
+      const [delStaff, delCocktails, delTables, delOrders] = await Promise.all([
         supabase.from('staff').delete().neq('id', '0'),
         supabase.from('cocktails').delete().neq('id', '0'),
         supabase.from('tables').delete().neq('id', '0'),
         supabase.from('orders').delete().not('id', 'is', null)
       ]);
+      if (delStaff.error) throw delStaff.error;
+      if (delCocktails.error) throw delCocktails.error;
+      if (delTables.error) throw delTables.error;
+      if (delOrders.error) throw delOrders.error;
 
       // Re-populate initial
-      await Promise.all([
+      const [insStaff, insCocktails, insTables, insOrders] = await Promise.all([
         supabase.from('staff').upsert(INITIAL_STAFF),
         supabase.from('cocktails').upsert(INITIAL_COCKTAILS),
         supabase.from('tables').upsert(INITIAL_TABLES),
         supabase.from('orders').upsert(INITIAL_ORDERS)
       ]);
-    } catch (err) {
+      if (insStaff.error) throw insStaff.error;
+      if (insCocktails.error) throw insCocktails.error;
+      if (insTables.error) throw insTables.error;
+      if (insOrders.error) throw insOrders.error;
+
+      setStaffList(INITIAL_STAFF);
+      setCocktails(INITIAL_COCKTAILS);
+      setTables(INITIAL_TABLES);
+      setOrders(INITIAL_ORDERS);
+      setMyOrderIds([]);
+      localStorage.removeItem('lounge_my_order_ids');
+
+      addNotification({
+        title: '雲端系統重設完成',
+        message: '已將 Supabase 雲端資料庫之店員名單、調酒品項與示範訂單重置為官方預設值。',
+        type: 'info'
+      });
+    } catch (err: any) {
       console.error('Failed to batch reset Supabase:', err);
+      addNotification({
+        title: '系統重設失敗',
+        message: err?.message || '請檢查網路連線',
+        type: 'info'
+      });
+      throw err;
     }
-
-    setStaffList(INITIAL_STAFF);
-    setCocktails(INITIAL_COCKTAILS);
-    setTables(INITIAL_TABLES);
-    setOrders(INITIAL_ORDERS);
-    setMyOrderIds([]);
-    localStorage.removeItem('lounge_my_order_ids');
-
-    addNotification({
-      title: '雲端系統重設完成',
-      message: '已將 Supabase 雲端資料庫之店員名單、調酒品項與示範訂單重置為官方預設值。',
-      type: 'info'
-    });
   };
 
   return (

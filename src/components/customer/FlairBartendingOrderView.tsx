@@ -118,9 +118,9 @@ export const FlairBartendingOrderView: React.FC = () => {
 
       setLastPlacedOrder(newOrder);
       setCustomerView('orders_status');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error submitting flair order:', err);
-      setValidationError('送出訂單時發生問題，請再試一次');
+      setValidationError(err?.message || '訂單送出失敗，請稍後再試。');
       setIsSubmitting(false);
     }
   };

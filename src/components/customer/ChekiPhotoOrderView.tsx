@@ -184,9 +184,9 @@ export const ChekiPhotoOrderView: React.FC = () => {
 
       setLastPlacedOrder(newOrder);
       setCustomerView('orders_status');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error submitting cheki order:', err);
-      setErrorMsg('送出訂單時發生問題，請再試一次');
+      setErrorMsg(err?.message || '訂單送出失敗，請稍後再試。');
     }
   };
 
