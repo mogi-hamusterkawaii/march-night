@@ -12,7 +12,8 @@ export const Header: React.FC = () => {
     myOrders,
     guestLocation,
     soundEnabled,
-    setSoundEnabled
+    setSoundEnabled,
+    isAdmin
   } = useApp();
 
   const myPendingOrActiveOrders = myOrders.filter(o => o.status === 'pending' || o.status === 'preparing' || o.status === 'in_service');
@@ -111,8 +112,8 @@ export const Header: React.FC = () => {
             {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-300" /> : <VolumeX className="w-4 h-4 text-white/40" />}
           </button>
 
-          {/* View Switcher: Shown ONLY when already in Admin Mode */}
-          {mode === 'admin' && (
+          {/* View Switcher: Shown when already authenticated Admin */}
+          {mode === 'admin' ? (
             <button
               onClick={() => handleModeSwitch('customer')}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold tracking-wide bg-[#9FB5C3] hover:bg-[#b0c4d1] text-[#0b0f17] shadow-[0_0_15px_rgba(159,181,195,0.35)] transition-all cursor-pointer"
@@ -121,6 +122,17 @@ export const Header: React.FC = () => {
               <Utensils className="w-3.5 h-3.5" />
               <span>返回前台點餐</span>
             </button>
+          ) : (
+            isAdmin && (
+              <button
+                onClick={() => handleModeSwitch('admin')}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold tracking-wide bg-blue-600/30 hover:bg-blue-600/45 text-blue-200 border border-blue-500/40 shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all cursor-pointer"
+                id="switch-to-admin-mode"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span>返回管理後台</span>
+              </button>
+            )
           )}
         </div>
       </div>

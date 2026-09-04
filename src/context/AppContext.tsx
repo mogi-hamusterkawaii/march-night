@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { Session } from '@supabase/supabase-js';
 import { Staff, CocktailItem, TableLocation, Order, OrderStatus, AppNotification, FlairBartendingOrder, ChekiPhotoOrder } from '../types';
 import { INITIAL_STAFF, INITIAL_COCKTAILS, INITIAL_TABLES, INITIAL_ORDERS } from '../data/initialData';
 import { playOrderSuccessSound, playStatusUpdateSound } from '../utils/audio';
@@ -10,6 +11,11 @@ interface AppContextType {
   customerView: 'home' | 'bartending' | 'cheki' | 'orders_status';
   setCustomerView: (view: 'home' | 'bartending' | 'cheki' | 'orders_status') => void;
   
+  // Auth Session & Admin Verification
+  session: Session | null;
+  isAdmin: boolean;
+  adminLogout: () => Promise<void>;
+
   // Data
   staffList: Staff[];
   cocktails: CocktailItem[];
@@ -83,12 +89,58 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+// Unique Human-readable Order Number Generator
+const generateOrderNumber = (prefix: 'FL' | 'CK'): string => {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let rand = '';
+  const cryptoObj = typeof window !== 'undefined' ? (window.crypto || (window as any).msCrypto) : null;
+  if (cryptoObj && cryptoObj.getRandomValues) {
+    const bytes = new Uint8Array(4);
+    cryptoObj.getRandomValues(bytes);
+    for (let i = 0; i < 4; i++) {
+      rand += chars[bytes[i] % chars.length];
+    }
+  } else {
+    for (let i = 0; i < 4; i++) {
+      rand += chars[Math.floor(Math.random() * chars.length)];
+    }
+  }
+  return `${prefix}-${month}${day}-${rand}`;
+};
+
+// UUID v4 Generator
+const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setMode] = useState<'customer' | 'admin'>('customer');
+  const [session, setSession] = useState<Session | null>(null);
+  const isAdmin = !!session;
+
+  const [mode, setModeState] = useState<'customer' | 'admin'>('customer');
   const [customerView, setCustomerView] = useState<'home' | 'bartending' | 'cheki' | 'orders_status'>('home');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
-  const dbType = 'Supabase';
+  const dbType = 'Supabase PostgreSQL';
+
+  // Safe mode setter: guests cannot switch to admin without authenticated session
+  const setMode = (newMode: 'customer' | 'admin') => {
+    if (newMode === 'admin' && !session) {
+      console.warn('Attempted to switch to admin without authenticated session.');
+      return;
+    }
+    setModeState(newMode);
+  };
 
   // My Order IDs saved locally for guest privacy tracking
   const [myOrderIds, setMyOrderIds] = useState<string[]>(() => {
@@ -149,12 +201,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ==========================================
-  // NORMALIZERS FOR ROBUST RUNTIME SAFETY
+  // NORMALIZERS FOR RUNTIME SAFETY
   // ==========================================
   const normalizeStaff = (s: any): Staff => {
     if (!s) return INITIAL_STAFF[0];
     
-    // Support nested chekiServices or flat photoPrice columns
     const withoutSignPrice = s.chekiServices?.without_sign?.price ?? s.photoPriceWithoutSign ?? 80000;
     const withSignPrice = s.chekiServices?.with_sign?.price ?? s.photoPriceWithSign ?? 150000;
     const withArtSignPrice = s.chekiServices?.with_art_sign?.price ?? s.photoPriceWithArtSign ?? 300000;
@@ -213,160 +264,241 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // ==========================================
-  // REAL-TIME SUPABASE POSTGRESQL SYNCHRONIZATION
+  // SUPABASE AUTH SESSION MANAGEMENT
   // ==========================================
+  useEffect(() => {
+    // 1. Check initial active session
+    supabase.auth.getSession().then(({ data: { session: initialSession }, error }) => {
+      if (error) {
+        console.warn('Failed to retrieve Supabase auth session:', error.message);
+      }
+      setSession(initialSession);
+      if (initialSession) {
+        setModeState('admin');
+      }
+    });
 
-  // Helper to fetch all data from Supabase
-  const loadInitialDataFromSupabase = async () => {
+    // 2. Listen to auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      setSession(currentSession);
+      if (currentSession) {
+        setModeState('admin');
+      } else {
+        setModeState('customer');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const adminLogout = async () => {
     try {
-      // 1. Fetch Staff
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      setSession(null);
+      setModeState('customer');
+      setCustomerView('home');
+      addNotification({
+        title: '已安全登出後台',
+        message: '已結束 Supabase 管理員身分驗證，切換回訪客前台。',
+        type: 'info'
+      });
+    } catch (err: any) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  // ==========================================
+  // PUBLIC DATA LOADING (Staff, Cocktails, Tables)
+  // ==========================================
+  const loadPublicData = useCallback(async () => {
+    try {
+      // 1. Staff (Public read)
       const { data: staffData, error: staffErr } = await supabase.from('staff').select('*');
       if (staffErr) {
-        console.warn('Supabase staff fetch error (table may need creation):', staffErr.message);
+        console.warn('Supabase staff fetch error:', staffErr.message);
       } else if (staffData && staffData.length > 0) {
         setStaffList(staffData.map(normalizeStaff));
-      } else {
-        // Auto-seed initial staff if table exists and is empty
-        try {
-          await supabase.from('staff').upsert(INITIAL_STAFF.map(serializeStaffForSupabase));
-        } catch (e) {
-          console.warn('Failed to seed initial staff:', e);
-        }
       }
 
-      // 2. Fetch Cocktails
+      // 2. Cocktails (Public read)
       const { data: cocktailData, error: cocktailErr } = await supabase.from('cocktails').select('*');
       if (cocktailErr) {
         console.warn('Supabase cocktails fetch error:', cocktailErr.message);
       } else if (cocktailData && cocktailData.length > 0) {
         setCocktails(cocktailData as CocktailItem[]);
-      } else {
-        try {
-          await supabase.from('cocktails').upsert(INITIAL_COCKTAILS);
-        } catch (e) {
-          console.warn('Failed to seed initial cocktails:', e);
-        }
       }
 
-      // 3. Fetch Tables
+      // 3. Tables (Public read)
       const { data: tableData, error: tableErr } = await supabase.from('tables').select('*');
       if (tableErr) {
         console.warn('Supabase tables fetch error:', tableErr.message);
       } else if (tableData && tableData.length > 0) {
         const sorted = (tableData as TableLocation[]).sort((a, b) => a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
         setTables(sorted);
-      } else {
-        try {
-          await supabase.from('tables').upsert(INITIAL_TABLES);
-        } catch (e) {
-          console.warn('Failed to seed initial tables:', e);
-        }
-      }
-
-      // 4. Fetch Orders
-      const { data: orderData, error: orderErr } = await supabase.from('orders').select('*').order('createdAt', { ascending: false });
-      if (orderErr) {
-        console.warn('Supabase orders fetch error:', orderErr.message);
-      } else if (orderData) {
-        setOrders(orderData as Order[]);
       }
 
       setIsOnline(true);
     } catch (err) {
-      console.warn('Supabase connection or initialization error:', err);
+      console.warn('Failed to load public data from Supabase:', err);
     }
-  };
+  }, []);
 
+  // ==========================================
+  // SECURE ORDER LOADING
+  // Admin: reads all orders
+  // Guest: strictly reads only own orders via RPC or filtered query
+  // ==========================================
+  const loadOrdersData = useCallback(async () => {
+    if (isAdmin) {
+      // Authenticated Admin: Load all orders
+      const { data: orderData, error: orderErr } = await supabase
+        .from('orders')
+        .select('*')
+        .order('createdAt', { ascending: false });
+
+      if (orderErr) {
+        console.warn('Admin orders fetch error:', orderErr.message);
+      } else if (orderData) {
+        setOrders(orderData as Order[]);
+      }
+    } else {
+      // Unauthenticated Guest: STRICT ISOLATION
+      // If guest has placed no orders, do NOT perform unnecessary network fetch
+      if (myOrderIds.length === 0) {
+        setOrders([]);
+        return;
+      }
+
+      // Try secure RPC function first
+      const { data: rpcData, error: rpcErr } = await supabase
+        .rpc('get_guest_orders_by_text', { order_ids: myOrderIds });
+
+      if (!rpcErr && rpcData) {
+        setOrders(rpcData as Order[]);
+      } else {
+        // Fallback to explicit ID filtering (never broad select(*))
+        const { data: filteredData, error: fallbackErr } = await supabase
+          .from('orders')
+          .select('*')
+          .in('id', myOrderIds)
+          .order('createdAt', { ascending: false });
+
+        if (fallbackErr) {
+          console.warn('Guest orders fetch error:', fallbackErr.message);
+        } else if (filteredData) {
+          setOrders(filteredData as Order[]);
+        }
+      }
+    }
+  }, [isAdmin, myOrderIds]);
+
+  // Trigger initial public data loading on mount
   useEffect(() => {
-    loadInitialDataFromSupabase();
+    loadPublicData();
+  }, [loadPublicData]);
 
-    // Setup Supabase Realtime Subscriptions
-    const channel = supabase
-      .channel('schema-db-changes')
-      // Listen to Orders
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newOrder = payload.new as Order;
-            setOrders(prev => {
-              if (prev.some(o => o.id === newOrder.id)) return prev;
-              return [newOrder, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as Order;
-            setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id: string }).id;
-            setOrders(prev => prev.filter(o => o.id !== deletedId));
-          }
-        }
-      )
-      // Listen to Staff
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'staff' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newStaff = normalizeStaff(payload.new);
-            setStaffList(prev => [...prev.filter(s => s.id !== newStaff.id), newStaff]);
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = normalizeStaff(payload.new);
-            setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s));
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id: string }).id;
-            setStaffList(prev => prev.filter(s => s.id !== deletedId));
-          }
-        }
-      )
-      // Listen to Cocktails
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'cocktails' },
-        (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const updated = payload.new as CocktailItem;
-            setCocktails(prev => [...prev.filter(c => c.id !== updated.id), updated]);
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id: string }).id;
-            setCocktails(prev => prev.filter(c => c.id !== deletedId));
-          }
-        }
-      )
-      // Listen to Tables
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'tables' },
-        (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const updated = payload.new as TableLocation;
-            setTables(prev => {
-              const filtered = prev.filter(t => t.id !== updated.id);
-              return [...filtered, updated].sort((a, b) => a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
-            });
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = (payload.old as { id: string }).id;
-            setTables(prev => prev.filter(t => t.id !== deletedId));
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          setIsOnline(true);
+  // Reload orders whenever auth state or local orders change
+  useEffect(() => {
+    loadOrdersData();
+  }, [loadOrdersData]);
+
+  // ==========================================
+  // SUPABASE REALTIME SUBSCRIPTIONS
+  // - Public tables (staff, cocktails, tables) listen globally
+  // - Orders:
+  //   * Admin listens to all changes (*: INSERT, UPDATE, DELETE)
+  //   * Guest ONLY listens to UPDATE events on their own orders
+  // ==========================================
+  useEffect(() => {
+    const channelName = isAdmin ? 'admin-channel' : 'guest-channel';
+    const channel = supabase.channel(channelName);
+
+    // Public staff changes
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, (payload) => {
+      if (payload.eventType === 'INSERT') {
+        const newStaff = normalizeStaff(payload.new);
+        setStaffList(prev => [...prev.filter(s => s.id !== newStaff.id), newStaff]);
+      } else if (payload.eventType === 'UPDATE') {
+        const updated = normalizeStaff(payload.new);
+        setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s));
+      } else if (payload.eventType === 'DELETE') {
+        const deletedId = (payload.old as { id: string }).id;
+        setStaffList(prev => prev.filter(s => s.id !== deletedId));
+      }
+    });
+
+    // Public cocktails changes
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'cocktails' }, (payload) => {
+      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+        const updated = payload.new as CocktailItem;
+        setCocktails(prev => [...prev.filter(c => c.id !== updated.id), updated]);
+      } else if (payload.eventType === 'DELETE') {
+        const deletedId = (payload.old as { id: string }).id;
+        setCocktails(prev => prev.filter(c => c.id !== deletedId));
+      }
+    });
+
+    // Public tables changes
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, (payload) => {
+      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+        const updated = payload.new as TableLocation;
+        setTables(prev => {
+          const filtered = prev.filter(t => t.id !== updated.id);
+          return [...filtered, updated].sort((a, b) => a.area.localeCompare(b.area) || a.code.localeCompare(b.code));
+        });
+      } else if (payload.eventType === 'DELETE') {
+        const deletedId = (payload.old as { id: string }).id;
+        setTables(prev => prev.filter(t => t.id !== deletedId));
+      }
+    });
+
+    if (isAdmin) {
+      // ADMIN: Listen to all order events
+      channel.on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newOrder = payload.new as Order;
+          setOrders(prev => {
+            if (prev.some(o => o.id === newOrder.id)) return prev;
+            return [newOrder, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = payload.new as Order;
+          setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
+        } else if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { id: string }).id;
+          setOrders(prev => prev.filter(o => o.id !== deletedId));
         }
       });
+    } else {
+      // GUEST: ONLY listen to UPDATE events on their own orders
+      channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
+        const updated = payload.new as Order;
+        if (myOrderIds.includes(updated.id)) {
+          setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
+          if (soundEnabled) playStatusUpdateSound();
+        }
+      });
+    }
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        setIsOnline(true);
+      }
+    });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [isAdmin, myOrderIds, soundEnabled]);
 
-  // Filter orders for the current guest
+  // Derived: orders placed by this device
   const myOrders = orders.filter(o => myOrderIds.includes(o.id));
 
   // ==========================================
-  // ORDER ACTIONS (SUPABASE INTEGRATION)
+  // ORDER CREATION ACTIONS (STRICT ERROR HANDLING)
   // ==========================================
 
   const addFlairOrder = async (data: {
@@ -382,9 +514,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     totalAmount: number;
   }): Promise<FlairBartendingOrder> => {
     const timestamp = Date.now();
-    const orderNo = `FL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+    const orderId = generateUUID();
+    const orderNo = generateOrderNumber('FL');
+
     const newOrder: FlairBartendingOrder = {
-      id: 'order-' + timestamp,
+      id: orderId,
       orderNo,
       serviceType: 'flair_bartending',
       guestCount: data.guestCount,
@@ -401,21 +535,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalAmount: data.totalAmount
     };
 
-    // Save to Supabase
-    try {
-      await supabase.from('orders').insert(newOrder);
-
-      // Update staff performance count in Supabase
-      const targetStaff = staffList.find(s => s.id === data.centerStaffId);
-      if (targetStaff) {
-        const newCount = (targetStaff.totalCenterOrdersCount || 0) + 1;
-        await supabase.from('staff').update({ totalCenterOrdersCount: newCount }).eq('id', targetStaff.id);
-      }
-    } catch (err) {
-      console.error('Failed to sync flair order to Supabase:', err);
+    // 1. Insert into Supabase with STRICT error check
+    const { error: insertErr } = await supabase.from('orders').insert(newOrder);
+    if (insertErr) {
+      console.error('Supabase flair order insert error:', insertErr);
+      throw new Error(`訂單建立失敗：${insertErr.message || '資料庫寫入異常，請確認連線'}`);
     }
 
-    // Local state updates
+    // 2. Also insert order items if table exists (ignore if optional)
+    try {
+      if (data.cocktails && data.cocktails.length > 0) {
+        const itemRows = data.cocktails.map(c => ({
+          order_id: orderId,
+          item_type: 'cocktail',
+          name: c.name,
+          price: c.price,
+          quantity: c.quantity,
+          sub_details: c.notes || ''
+        }));
+        await supabase.from('order_items').insert(itemRows);
+      }
+    } catch (e) {
+      // order_items is secondary; primary order succeeded
+      console.warn('Non-fatal order_items insert error:', e);
+    }
+
+    // 3. Update staff center counter
+    const targetStaff = staffList.find(s => s.id === data.centerStaffId);
+    if (targetStaff) {
+      const newCount = (targetStaff.totalCenterOrdersCount || 0) + 1;
+      await supabase.from('staff').update({ totalCenterOrdersCount: newCount }).eq('id', targetStaff.id);
+    }
+
+    // 4. CONFIRMED SUCCESS: Update local state
     setOrders(prev => [newOrder, ...prev]);
     setMyOrderIds(prev => [newOrder.id, ...prev]);
     setLastPlacedOrder(newOrder);
@@ -443,9 +595,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     totalAmount: number;
   }): Promise<ChekiPhotoOrder> => {
     const timestamp = Date.now();
-    const orderNo = `CK-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+    const orderId = generateUUID();
+    const orderNo = generateOrderNumber('CK');
+
     const newOrder: ChekiPhotoOrder = {
-      id: 'order-' + timestamp,
+      id: orderId,
       orderNo,
       serviceType: 'cheki_photo',
       staffId: data.staffId,
@@ -462,20 +616,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const totalQty = data.items.reduce((acc, i) => acc + i.quantity, 0);
 
-    // Save to Supabase
-    try {
-      await supabase.from('orders').insert(newOrder);
-      
-      const targetStaff = staffList.find(s => s.id === data.staffId);
-      if (targetStaff) {
-        const newTotalCheki = (targetStaff.totalChekiCount || 0) + totalQty;
-        await supabase.from('staff').update({ totalChekiCount: newTotalCheki }).eq('id', targetStaff.id);
-      }
-    } catch (err) {
-      console.error('Failed to sync cheki order to Supabase:', err);
+    // 1. Insert into Supabase with STRICT error check
+    const { error: insertErr } = await supabase.from('orders').insert(newOrder);
+    if (insertErr) {
+      console.error('Supabase cheki order insert error:', insertErr);
+      throw new Error(`訂單建立失敗：${insertErr.message || '資料庫寫入異常，請確認連線'}`);
     }
 
-    // Local state updates
+    // 2. Also insert order items if table exists
+    try {
+      if (data.items && data.items.length > 0) {
+        const itemRows = data.items.map(item => ({
+          order_id: orderId,
+          item_type: 'cheki',
+          name: `${item.name} (${item.type === 'without_sign' ? '無簽' : item.type === 'with_sign' ? '親簽' : '繪簽'})`,
+          price: item.price,
+          quantity: item.quantity,
+          sub_details: item.poseRequest || ''
+        }));
+        await supabase.from('order_items').insert(itemRows);
+      }
+    } catch (e) {
+      console.warn('Non-fatal order_items insert error:', e);
+    }
+
+    // 3. Update staff cheki count
+    const targetStaff = staffList.find(s => s.id === data.staffId);
+    if (targetStaff) {
+      const newTotalCheki = (targetStaff.totalChekiCount || 0) + totalQty;
+      await supabase.from('staff').update({ totalChekiCount: newTotalCheki }).eq('id', targetStaff.id);
+    }
+
+    // 4. CONFIRMED SUCCESS: Update local state
     setOrders(prev => [newOrder, ...prev]);
     setMyOrderIds(prev => [newOrder.id, ...prev]);
     setLastPlacedOrder(newOrder);
@@ -492,11 +664,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newOrder;
   };
 
+  // ==========================================
+  // ADMIN ACTIONS (STRICT ERROR HANDLING)
+  // ==========================================
+
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
-    try {
-      await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
-    } catch (err) {
-      console.error('Failed to update status in Supabase:', err);
+    const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
+    if (error) {
+      console.error('Failed to update status in Supabase:', error);
+      throw new Error(`更新訂單狀態失敗：${error.message}`);
     }
 
     setOrders(prev => prev.map(order => {
@@ -527,12 +703,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Staff Management (Supabase)
+  // Staff Management
   const updateStaff = async (updated: Staff) => {
-    try {
-      await supabase.from('staff').upsert(serializeStaffForSupabase(updated));
-    } catch (err) {
-      console.error('Failed to update staff in Supabase:', err);
+    const { error } = await supabase.from('staff').upsert(serializeStaffForSupabase(updated));
+    if (error) {
+      console.error('Failed to update staff in Supabase:', error);
+      throw new Error(`更新店員資料失敗：${error.message}`);
     }
     setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s));
   };
@@ -544,29 +720,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalCenterOrdersCount: 0,
       totalChekiCount: 0
     };
-    try {
-      await supabase.from('staff').insert(serializeStaffForSupabase(newStaff));
-    } catch (err) {
-      console.error('Failed to add staff to Supabase:', err);
+    const { error } = await supabase.from('staff').insert(serializeStaffForSupabase(newStaff));
+    if (error) {
+      console.error('Failed to add staff to Supabase:', error);
+      throw new Error(`新增店員失敗：${error.message}`);
     }
     setStaffList(prev => [...prev, newStaff]);
   };
 
   const deleteStaff = async (id: string) => {
-    try {
-      await supabase.from('staff').delete().eq('id', id);
-    } catch (err) {
-      console.error('Failed to delete staff in Supabase:', err);
+    const { error } = await supabase.from('staff').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete staff in Supabase:', error);
+      throw new Error(`刪除店員失敗：${error.message}`);
     }
     setStaffList(prev => prev.filter(s => s.id !== id));
   };
 
-  // Cocktails Management (Supabase)
+  // Cocktails Management
   const updateCocktail = async (item: CocktailItem) => {
-    try {
-      await supabase.from('cocktails').upsert(item);
-    } catch (err) {
-      console.error('Failed to update cocktail in Supabase:', err);
+    const { error } = await supabase.from('cocktails').upsert(item);
+    if (error) {
+      console.error('Failed to update cocktail in Supabase:', error);
+      throw new Error(`更新調酒品項失敗：${error.message}`);
     }
     setCocktails(prev => prev.map(c => c.id === item.id ? item : c));
   };
@@ -576,29 +752,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...item,
       id: 'cocktail-' + Date.now()
     };
-    try {
-      await supabase.from('cocktails').insert(newItem);
-    } catch (err) {
-      console.error('Failed to add cocktail in Supabase:', err);
+    const { error } = await supabase.from('cocktails').insert(newItem);
+    if (error) {
+      console.error('Failed to add cocktail in Supabase:', error);
+      throw new Error(`新增調酒品項失敗：${error.message}`);
     }
     setCocktails(prev => [...prev, newItem]);
   };
 
   const deleteCocktail = async (id: string) => {
-    try {
-      await supabase.from('cocktails').delete().eq('id', id);
-    } catch (err) {
-      console.error('Failed to delete cocktail in Supabase:', err);
+    const { error } = await supabase.from('cocktails').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete cocktail in Supabase:', error);
+      throw new Error(`刪除調酒品項失敗：${error.message}`);
     }
     setCocktails(prev => prev.filter(c => c.id !== id));
   };
 
-  // Tables Management (Supabase)
+  // Tables Management
   const updateTable = async (table: TableLocation) => {
-    try {
-      await supabase.from('tables').upsert(table);
-    } catch (err) {
-      console.error('Failed to update table in Supabase:', err);
+    const { error } = await supabase.from('tables').upsert(table);
+    if (error) {
+      console.error('Failed to update table in Supabase:', error);
+      throw new Error(`更新桌位資訊失敗：${error.message}`);
     }
     setTables(prev => prev.map(t => t.id === table.id ? table : t));
   };
@@ -608,29 +784,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...table,
       id: 'loc-' + Date.now()
     };
-    try {
-      await supabase.from('tables').insert(newTable);
-    } catch (err) {
-      console.error('Failed to add table in Supabase:', err);
+    const { error } = await supabase.from('tables').insert(newTable);
+    if (error) {
+      console.error('Failed to add table in Supabase:', error);
+      throw new Error(`新增桌位失敗：${error.message}`);
     }
     setTables(prev => [...prev, newTable]);
   };
 
   const deleteTable = async (id: string) => {
-    try {
-      await supabase.from('tables').delete().eq('id', id);
-    } catch (err) {
-      console.error('Failed to delete table in Supabase:', err);
+    const { error } = await supabase.from('tables').delete().eq('id', id);
+    if (error) {
+      console.error('Failed to delete table in Supabase:', error);
+      throw new Error(`刪除桌位失敗：${error.message}`);
     }
     setTables(prev => prev.filter(t => t.id !== id));
   };
 
-  // Single Order Deletion (Supabase)
+  // Single Order Deletion
   const deleteSingleOrder = async (orderId: string) => {
-    try {
-      await supabase.from('orders').delete().eq('id', orderId);
-    } catch (err) {
-      console.error('Failed to delete order in Supabase:', err);
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) {
+      console.error('Failed to delete order in Supabase:', error);
+      throw new Error(`刪除訂單失敗：${error.message}`);
     }
     setOrders(prev => prev.filter(o => o.id !== orderId));
     setMyOrderIds(prev => prev.filter(id => id !== orderId));
@@ -641,11 +817,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Clear ALL Orders for Next Day Operation
   const clearAllOrders = async () => {
-    try {
-      // In Supabase, delete all rows from orders
-      await supabase.from('orders').delete().neq('id', '0');
-    } catch (err) {
-      console.error('Failed to clear orders in Supabase:', err);
+    // In PostgreSQL / Supabase, delete all rows
+    const { error } = await supabase.from('orders').delete().neq('status', 'nonexistent_status_to_delete_all');
+    if (error) {
+      console.error('Failed to clear orders in Supabase:', error);
+      throw new Error(`清空訂單失敗：${error.message}`);
     }
 
     setOrders([]);
@@ -660,26 +836,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Reset System to Default (Supabase)
+  // Reset System to Default
   const resetToDefaultData = async () => {
     try {
-      // Clean existing
       await Promise.all([
-        supabase.from('staff').delete().neq('id', '0'),
-        supabase.from('cocktails').delete().neq('id', '0'),
-        supabase.from('tables').delete().neq('id', '0'),
-        supabase.from('orders').delete().neq('id', '0')
+        supabase.from('staff').delete().neq('id', 'nonexistent'),
+        supabase.from('cocktails').delete().neq('id', 'nonexistent'),
+        supabase.from('tables').delete().neq('id', 'nonexistent'),
+        supabase.from('orders').delete().neq('id', 'nonexistent')
       ]);
 
-      // Re-populate initial
       await Promise.all([
-        supabase.from('staff').upsert(INITIAL_STAFF),
+        supabase.from('staff').upsert(INITIAL_STAFF.map(serializeStaffForSupabase)),
         supabase.from('cocktails').upsert(INITIAL_COCKTAILS),
         supabase.from('tables').upsert(INITIAL_TABLES),
         supabase.from('orders').upsert(INITIAL_ORDERS)
       ]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to batch reset Supabase:', err);
+      throw new Error(`重設資料庫失敗：${err.message || '連線逾時'}`);
     }
 
     setStaffList(INITIAL_STAFF);
@@ -703,6 +878,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setMode,
         customerView,
         setCustomerView,
+        session,
+        isAdmin,
+        adminLogout,
         staffList,
         cocktails,
         tables,
